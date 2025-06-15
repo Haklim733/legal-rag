@@ -1,0 +1,88 @@
+version: '3.8'
+
+services:
+  # LightRAG Core Service
+  lightrag:
+    container_name: lightrag
+    image: ghcr.io/hkuds/lightrag:latest
+    ports:
+      - "9621:9621"  # Default LightRAG port
+    volumes:
+      - ./data/rag_storage:/app/data/rag_storage
+      - ./data/inputs:/app/data/inputs
+      - ./config.ini:/app/config.ini
+      - ./.env:/app/.env
+    env_file:
+      - .env
+    restart: unless-stopped
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - irs_net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9621/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  # Document Processing Service
+  doc-processor:
+    build:
+      context: ./packages/elt
+      dockerfile: Dockerfile
+    container_name: doc-processor
+    restart: unless-stopped
+    volumes:
+      - ./data/inputs:/app/documents
+      - ./.cache:/root/.cache
+    environment:
+      LIGHTRAG_API_URL: http://lightrag:9621
+      PYTHONUNBUFFERED: 1
+    depends_on:
+      lightrag:
+        condition: service_healthy
+    networks:
+      - irs_net
+
+  # Web UI (optional)
+  lightrag-ui:
+    image: ghcr.io/hkuds/lightrag-ui:latest
+    container_name: lightrag-ui
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      REACT_APP_API_URL: http://lightrag:9621
+    depends_on:
+      lightrag:
+        condition: service_healthy
+    networks:
+      - irs_net
+
+  # Health check and monitoring
+  healthcheck:
+    image: nicolaka/netshoot
+    container_name: healthcheck
+    command: |
+      /bin/sh -c "while true; do
+        curl -f http://lightrag:9621/health || exit 1
+        sleep 30
+      done"
+    depends_on:
+      lightrag:
+        condition: service_healthy
+    networks:
+      - irs_net
+
+# Network configuration
+networks:
+  irs_net:
+    driver: bridge
+
+# Volumes for persistent data
+volumes:
+  lightrag_data:
+    driver: local
+  document_store:
+    driver: local

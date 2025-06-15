@@ -1,0 +1,145 @@
+- name: irs.reports_agi
+  description: IRS reports individual income tax data aggregated at the state level.
+  columns:
+    statefips: varchar        # 2-digit FIPS code for the state
+    state: varchar            # State postal abbreviation
+    state_name: varchar       # Full state name
+    total: double             # Total number of returns
+    top_01: double            # Top 1% threshold (AGI or count)
+    top_05: double            # Top 5% threshold
+    top_10: double            # Top 10% threshold
+    top_25: double            # Top 25% threshold
+    top_50: double            # Top 50% threshold
+    top_75: double            # Top 75% threshold
+    agi_01: double            # AGI for top 1%
+    agi_05: double            # AGI for top 5%
+    agi_10: double            # AGI for top 10%
+    agi_25: double            # AGI for top 25%
+    agi_50: double            # AGI for top 50%
+    agi_75: double            # AGI for top 75%
+    total_agi: double         # Total adjusted gross income (AGI)
+    sum_agi_01: double        # Sum AGI for top 1%
+    sum_agi_05: double        # Sum AGI for top 5%
+    sum_agi_10: double        # Sum AGI for top 10%
+    sum_agi_25: double        # Sum AGI for top 25%
+    sum_agi_50: double        # Sum AGI for top 50%
+    sum_agi_75: double        # Sum AGI for top 75%
+    total_sal_num: double     # Total number of salary recipients
+    total_sal_amt: double     # Total salary amount
+    num_sal_01: double        # Number of salary recipients, top 1%
+    sum_sal_01: double        # Salary sum, top 1%
+    num_sal_05: double        # Number of salary recipients, top 5%
+    sum_sal_05: double        # Salary sum, top 5%
+    num_sal_10: double        # Number of salary recipients, top 10%
+    sum_sal_10: double        # Salary sum, top 10%
+    num_sal_25: double        # Number of salary recipients, top 25%
+    sum_sal_25: double        # Salary sum, top 25%
+    num_sal_50: double        # Number of salary recipients, top 50%
+    sum_sal_50: double        # Salary sum, top 50%
+    num_sal_75: double        # Number of salary recipients, top 75%
+    sum_sal_75: double        # Salary sum, top 75%
+    total_int_num: double     # Total number of interest recipients
+    total_int_amt: double     # Total interest amount
+    num_int_01: double        # Number of interest recipients, top 1%
+    sum_int_01: double        # Interest sum, top 1%
+    num_int_05: double        # Number of interest recipients, top 5%
+    sum_int_05: double        # Interest sum, top 5%
+    num_int_10: double        # Number of interest recipients, top 10%
+    sum_int_10: double        # Interest sum, top 10%
+    num_int_25: double        # Number of interest recipients, top 25%
+    sum_int_25: double        # Interest sum, top 25%
+    num_int_50: double        # Number of interest recipients, top 50%
+    sum_int_50: double        # Interest sum, top 50%
+    num_int_75: double        # Number of interest recipients, top 75%
+    sum_int_75: double        # Interest sum, top 75%
+    total_div_num: double     # Total number of dividend recipients
+    total_div_amt: double     # Total dividend amount
+    num_div_01: double        # Number of dividend recipients, top 1%
+    sum_div_01: double        # Dividend sum, top 1%
+    num_div_05: double        # Number of dividend recipients, top 5%
+    sum_div_05: double        # Dividend sum, top 5%
+    num_div_10: double        # Number of dividend recipients, top 10%
+    sum_div_10: double        # Dividend sum, top 10%
+    num_div_25: double        # Number of dividend recipients, top 25%
+    sum_div_25: double        # Dividend sum, top 25%
+    num_div_50: double        # Number of dividend recipients, top 50%
+    sum_div_50: double        # Dividend sum, top 50%
+    num_div_75: double        # Number of dividend recipients, top 75%
+    sum_div_75: double        # Dividend sum, top 75%
+    total_businc_num: double  # Total number of business income recipients
+    total_businc_amt: double  # Total business income amount
+    num_businc_01: double     # Number of business income recipients, top 1%
+    sum_businc_01: double     # Business income sum, top 1%
+    num_businc_05: double     # Number of business income recipients, top 5%
+    sum_businc_05: double     # Business income sum, top 5%
+    num_businc_10: double     # Number of business income recipients, top 10%
+    sum_businc_10: double     # Business income sum, top 10%
+    num_businc_25: double     # Number of business income recipients, top 25%
+    sum_businc_25: double     # Business income sum, top 25%
+    num_businc_50: double     # Number of business income recipients, top 50%
+    sum_businc_50: double     # Business income sum, top 50%
+    num_businc_75: double     # Number of business income recipients, top 75%
+    sum_businc_75: double     # Business income sum, top 75%
+    total_cpgain_num: double  # Total number of capital gain recipients
+    total_cpgain_amt: double  # Total capital gain amount
+    num_cpgain_01: double     # Number of capital gain recipients, top 1%
+    sum_cpgain_01: double     # Capital gain sum, top 1%
+    num_cpgain_05: double     # Number of capital gain recipients, top 5%
+    sum_cpgain_05: double     # Capital gain sum, top 5%
+    num_cpgain_10: double     # Number of capital gain recipients, top 10%
+    sum_cpgain_10: double     # Capital gain sum, top 10%
+    num_cpgain_25: double     # Number of capital gain recipients, top 25%
+    sum_cpgain_25: double     # Capital gain sum, top 25%
+    num_cpgain_50: double     # Number of capital gain recipients, top 50%
+    sum_cpgain_50: double     # Capital gain sum, top 50%
+    num_cpgain_75: double     # Number of capital gain recipients, top 75%
+    sum_cpgain_75: double     # Capital gain sum, top 75%
+    total_iradist_num: double # Total number of IRA distribution recipients
+    total_iradist_amt: double # Total IRA distribution amount
+    num_iradist_01: double    # Number of IRA distribution recipients, top 1%
+    sum_iradist_01: double    # IRA distribution sum, top 1%
+    num_iradist_05: double    # Number of IRA distribution recipients, top 5%
+    sum_iradist_05: double    # IRA distribution sum, top 5%
+    num_iradist_10: double    # Number of IRA distribution recipients, top 10%
+    sum_iradist_10: double    # IRA distribution sum, top 10%
+    num_iradist_25: double    # Number of IRA distribution recipients, top 25%
+    sum_iradist_25: double    # IRA distribution sum, top 25%
+    num_iradist_50: double    # Number of IRA distribution recipients, top 50%
+    sum_iradist_50: double    # IRA distribution sum, top 50%
+    num_iradist_75: double    # Number of IRA distribution recipients, top 75%
+    sum_iradist_75: double    # IRA distribution sum, top 75%
+    total_pension_num: double # Total number of pension recipients
+    total_pension_amt: double # Total pension amount
+    num_pension_01: double    # Number of pension recipients, top 1%
+    sum_pension_01: double    # Pension sum, top 1%
+    num_pension_05: double    # Number of pension recipients, top 5%
+    sum_pension_05: double    # Pension sum, top 5%
+    num_pension_10: double    # Number of pension recipients, top 10%
+    sum_pension_10: double    # Pension sum, top 10%
+    num_pension_25: double    # Number of pension recipients, top 25%
+    sum_pension_25: double    # Pension sum, top 25%
+    num_pension_50: double    # Number of pension recipients, top 50%
+    sum_pension_50: double    # Pension sum, top 50%
+    num_pension_75: double    # Number of pension recipients, top 75%
+    sum_pension_75: double    # Pension sum, top 75%
+    total_scorp_num: double   # Total number of S corporation recipients
+    total_scorp_amt: double   # Total S corporation amount
+    num_scorp_01: double     # Number of S corporation recipients, top 1%
+    sum_scorp_01: double     # S corporation sum, top 1%
+    num_scorp_05: double     # Number of S corporation recipients, top 5%
+    sum_scorp_05: double     # S corporation sum, top 5%
+    num_scorp_10: double     # Number of S corporation recipients, top 10%
+    sum_scorp_10: double     # S corporation sum, top 10%
+    num_scorp_25: double     # Number of S corporation recipients, top 25%
+    sum_scorp_25: double     # S corporation sum, top 25%
+    num_scorp_50: double     # Number of S corporation recipients, top 50%
+    sum_scorp_50: double     # S corporation sum, top 50%
+    num_scorp_75: double     # Number of S corporation recipients, top 75%
+    sum_scorp_75: double     # S corporation sum, top 75%
+    total_tax: double        # Total tax
+    sum_tax_01: double       # Tax sum, top 1%
+    sum_tax_05: double       # Tax sum, top 5%
+    sum_tax_10: double       # Tax sum, top 10%
+    sum_tax_25: double       # Tax sum, top 25%
+    sum_tax_50: double       # Tax sum, top 50%
+    sum_tax_75: double       # Tax sum, top 75%

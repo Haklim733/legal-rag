@@ -1,0 +1,109 @@
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.pyc
+*.pyo
+*.pyd
+*.pdb
+*.egg
+*.egg-info/
+dist/
+build/
+.eggs/
+pip-wheel-metadata/
+*.manifest
+*.spec
+*.log
+
+# Virtual environments
+venv/
+ENV/
+env/
+.venv/
+.ENV/
+.env/
+env.bak/
+venv.bak/
+
+# PyInstaller
+*.spec
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# pytest
+.cache
+.pytest_cache/
+
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# coverage
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+.hypothesis/
+
+# ---- Node/TypeScript/Svelte ----
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+dist/
+build/
+.svelte-kit/
+.svelte/
+*.tsbuildinfo
+
+# SvelteKit
+.vercel/
+.netlify/
+output/
+
+# ---- Miscellaneous ----
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*.swn
+*.bak
+
+# ---- Editor/IDE ----
+.vscode/
+.idea/
+*.code-workspace
+*.sublime-workspace
+*.sublime-project
+
+# ---- Environment files ----
+.env
+.env.*
+!.env.example
+
+
+# misc
+*.docx
+*.doc
+*.csv
+*.db
+*.db.wal
+*.shp
+*.shx
+*.xlsx
+
+# data
+**/data
+
+# ---- SST ----
+.sst/
+
+# docs
+*.pdf

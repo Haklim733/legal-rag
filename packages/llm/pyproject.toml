@@ -1,0 +1,17 @@
+[project]
+name = "llm"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "fastapi>=0.115.12",
+    "huggingface>=0.0.1",
+    "protobuf>=6.30.0",
+    "pydantic>=2.11.5",
+    "sentence-transformers>=4.1.0",
+    "transformers[torch]>=4.49.0",
+    "networkx>=3.0,<3.4.2",
+    "numpy>=2.0.0,<2.2.6",
+    "uvicorn",
+]

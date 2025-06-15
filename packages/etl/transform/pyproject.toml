@@ -1,0 +1,68 @@
+[project]
+name = "irs"
+version = "0.1.0"
+description = "analyze stocks using thetadata"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "backoff>=2.2.1",
+    "duckdb>=1.2.2",
+    "fastavro>=1.10.0",
+    "loguru>=0.7.3",
+    "psutil>=7.0.0",
+    "pyarrow>=19.0.1",
+    "pyiceberg[glue,pyarrow,rest-sigv4,s3fs]>=0.9.0",
+    "pytest-profiling>=1.8.1",
+    "requests>=2.32.3",
+    "sqlglot[rs]>=26.12.1",
+    "sqlmesh>=0.171.2",
+]
+
+[dependency-groups]
+dev = [
+    "pre-commit>=4.2.0",
+    "pytest>=8.3.5",
+    "pytest-dependency>=0.6.0",
+    "snakeviz>=2.2.2",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.bandit]
+exclude_dirs = ["tests"]
+
+[tool.mypy]
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+exclude = ["tests\\.py$", "frontend"]
+
+[[tool.mypy.overrides]]
+module = ["bottle", "boto3", "botocore", "pandas", "botocore.exceptions", "mypy_boto3_s3.type_defs", "mypy_boto3_dynamodb.*",
+"numpy", "requests.*",  "scipy.stats"]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = [
+    "packages/bhsl/tests",
+]
+addopts = "--ignore=packages/postgres --ignore=packages/functions"
+markers = ["incremental: mark a test as incremental."]
+log_cli = true
+log_cli_level = "WARNING"
+log_cli_format = "%(asctime)s [%(levelname)s] %(message)s (%(filename)s:%(lineno)s)"
+log_cli_date_format = "%Y-%m-%d"
+log_date_format = "%Y-%m-%d %H:%M:%S"
+log_format = "%(asctime)s [%(levelname)s] %(message)s (%(filename)s:%(lineno)s)"
+log_level = "INFO"
+
+[tool.pylint]
+ignore-paths="tests|infra/backend/|scripts/unit_tests.py"
+max-line-length = 88
+disable = """
+    too-many-arguments,R0914,C0103,R1728,R0903
+"""
