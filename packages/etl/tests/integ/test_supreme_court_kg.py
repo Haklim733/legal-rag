@@ -1,5 +1,5 @@
 """
-Integration tests for the Supreme Court knowledge graph builder.
+Integration tests for the Supreme Court knowledge graph builder and store.
 """
 import json
 import sys
@@ -13,10 +13,13 @@ sys.path.append(str(Path(__file__).parent.parent.parent))
 
 from kg.supreme_court import (
     SupremeCourtKG,
-    SupremeCourtCase,
     save_knowledge_graph,
     load_knowledge_graph
 )
+
+# Import the new store and models
+from src.rag.store import KnowledgeGraphStore, create_kg_store
+from src.rag.models import SupremeCourtCase
 
 # Sample data to mock the Data Commons API responses
 SAMPLE_CASES_RESPONSE = {
@@ -47,7 +50,15 @@ SAMPLE_CASE_DETAILS = {
             'citation': '410 U.S. 113',
             'parties': 'Jane Roe, et al. v. Henry Wade',
             'decisionDirection': 'reversed',
-            'opinionAuthor': 'Harry Blackmun'
+            'opinionAuthor': 'Harry Blackmun',
+            'cites': ['dcid:case2']
+        },
+        'dcid:case2': {
+            'name': 'Griswold v. Connecticut',
+            'citation': '381 U.S. 479',
+            'parties': 'Griswold v. Connecticut',
+            'decisionDirection': 'reversed',
+            'opinionAuthor': 'William O. Douglas'
         }
     }
 }
@@ -70,6 +81,46 @@ def mock_kg_client():
         
         yield SupremeCourtKG()
 
+@pytest.fixture(scope="module")
+def test_cases():
+    """Provide test cases for the knowledge graph store tests."""
+    return [
+        SupremeCourtCase(
+            dcid="dcid:case1",
+            name="Roe v. Wade",
+            description="Landmark decision on abortion rights",
+            date_decided="1973-01-22",
+            citation="410 U.S. 113",
+            parties="Jane Roe, et al. v. Henry Wade",
+            decision_direction="reversed",
+            opinion_author="Harry Blackmun",
+            cites=["dcid:case2"]
+        ),
+        SupremeCourtCase(
+            dcid="dcid:case2",
+            name="Griswold v. Connecticut",
+            description="Established right to privacy in marital relations",
+            date_decided="1965-06-07",
+            citation="381 U.S. 479",
+            parties="Griswold v. Connecticut",
+            decision_direction="reversed",
+            opinion_author="William O. Douglas"
+        )
+    ]
+
+@pytest.fixture
+def kg_store(tmp_path, test_cases):
+    """Create and populate a knowledge graph store for testing."""
+    store = create_kg_store(
+        entities=test_cases,
+        entity_type=SupremeCourtCase,
+        db_path=str(tmp_path / "test_kg_store"),
+        id_field="dcid",
+        text_fields=["name", "description", "parties", "opinion_author"],
+        relationship_types={"CITES": ["cites"]}
+    )
+    return store
+
 def test_save_and_load_knowledge_graph(tmp_path):
     """Test saving and loading a knowledge graph to/from a file."""
     # Create test cases
@@ -88,24 +139,32 @@ def test_save_and_load_knowledge_graph(tmp_path):
         )
     ]
     
+    # Create a store and add cases
+    store = create_kg_store(
+        entities=cases,
+        entity_type=SupremeCourtCase,
+        db_path=str(tmp_path / "test_kg")
+    )
+    
     # Test saving
     output_path = tmp_path / 'test_kg.json'
-    save_knowledge_graph(cases, output_path)
+    store.save(output_path)
     
-    # Verify file was created and has content
+    # Verify file was created
     assert output_path.exists()
-    with open(output_path, 'r') as f:
-        data = json.load(f)
-        assert len(data) == 2
-        assert data[0]['name'] == 'Test Case 1'
-        assert data[1]['name'] == 'Test Case 2'
     
     # Test loading
-    loaded_cases = load_knowledge_graph(output_path)
-    assert len(loaded_cases) == 2
-    assert isinstance(loaded_cases[0], SupremeCourtCase)
-    assert loaded_cases[0].name == 'Test Case 1'
-    assert loaded_cases[1].name == 'Test Case 2'
+    loaded_store = KnowledgeGraphStore.load(
+        path=output_path,
+        entity_type=SupremeCourtCase
+    )
+    
+    # Verify loaded data
+    for case in cases:
+        loaded = loaded_store.get_entity(case.dcid)
+        assert loaded is not None
+        assert loaded['name'] == case.name
+        assert loaded['description'] == case.description
 
 def test_query_cases_by_year(mock_kg_client):
     """Test querying cases by year with mocked API responses."""
@@ -121,6 +180,38 @@ def test_query_cases_by_year(mock_kg_client):
     assert len(cases) == 2
     assert cases[0].name == 'Roe v. Wade'
     assert cases[1].name == 'Brown v. Board of Education'
+
+class TestKnowledgeGraphStore:
+    """Tests for the knowledge graph store functionality."""
+    
+    def test_add_and_retrieve_case(self, kg_store, test_cases):
+        """Test adding and retrieving cases from the knowledge graph."""
+        # Test retrieving each case by ID
+        for case in test_cases:
+            retrieved = kg_store.get_entity(case.dcid)
+            assert retrieved is not None
+            assert retrieved["name"] == case.name
+            assert retrieved["description"] == case.description
+    
+    def test_search(self, kg_store):
+        """Test searching the knowledge graph."""
+        # Test search by topic
+        results = kg_store.search("abortion rights", limit=1)
+        assert len(results) > 0
+        assert "Roe" in results[0]["name"]
+        
+        # Test search by justice name
+        results = kg_store.search("Blackmun", limit=1)
+        assert len(results) > 0
+        assert "Roe" in results[0]["name"]
+    
+    def test_relationships(self, kg_store):
+        """Test that relationships are properly stored and retrieved."""
+        # Test that Roe v. Wade cites Griswold v. Connecticut
+        roe = kg_store.get_entity("dcid:case1")
+        assert roe is not None
+        assert "cites" in roe
+        assert "dcid:case2" in roe["cites"]
 
 def test_main_integration(tmp_path, monkeypatch, mock_kg_client, capsys):
     """Test the main script functionality with mocked dependencies."""
@@ -146,29 +237,8 @@ def test_main_integration(tmp_path, monkeypatch, mock_kg_client, capsys):
     # Load and verify the saved data
     with open(output_path, 'r') as f:
         data = json.load(f)
-        
-    # Print the knowledge graph output
-    print("\nKnowledge Graph Output:")
-    print(json.dumps(data, indent=2))
     
     # Basic assertions
     assert len(data) > 0
     assert 'name' in data[0]
     assert 'dcid' in data[0]
-    
-    # Print a summary of the first case
-    if data:
-        first_case = data[0]
-        print("\nFirst Case Summary:")
-        print(f"Name: {first_case.get('name')}")
-        print(f"ID: {first_case.get('dcid')}")
-        print(f"Description: {first_case.get('description')}")
-        print(f"Date Decided: {first_case.get('date_decided')}")
-        if 'citation' in first_case:
-            print(f"Citation: {first_case['citation']}")
-        if 'parties' in first_case:
-            print(f"Parties: {first_case['parties']}")
-        if 'decision_direction' in first_case:
-            print(f"Decision: {first_case['decision_direction']}")
-        if 'opinion_author' in first_case:
-            print(f"Opinion by: {first_case['opinion_author']}")

@@ -5,13 +5,25 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
+    # FastApi
     "fastapi>=0.115.12",
-    "huggingface>=0.0.1",
-    "protobuf>=6.30.0",
-    "pydantic>=2.11.5",
-    "sentence-transformers>=4.1.0",
-    "transformers[torch]>=4.49.0",
-    "networkx>=3.0,<3.4.2",
+    "uvicorn[standard]>=0.29.0",
+    "python-multipart>=0.0.7",
+    
+    # Model and embeddings
+    "sentence-transformers[all]>=4.1.0",  # Includes transformers and torch as dependencies
+    "huggingface-hub>=0.30.0",
+    
+    # Data handling
     "numpy>=2.0.0,<2.2.6",
-    "uvicorn",
+    "pydantic>=2.11.5"
+]
+
+[project.optional-dependencies]
+# Additional dependencies for development and testing
+dev = [
+    "pytest>=7.0.0",
+    "black>=23.0.0",
+    "isort>=5.0.0",
+    "mypy>=1.0.0"
 ]
