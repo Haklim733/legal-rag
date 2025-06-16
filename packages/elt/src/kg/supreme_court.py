@@ -6,7 +6,9 @@ import requests
 import json
 from pathlib import Path
 import logging
-from dataclasses import dataclass, asdict
+from pydantic import BaseModel
+import asyncio
+from folio import FOLIO
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -15,8 +17,7 @@ logger = logging.getLogger(__name__)
 # Data Commons API endpoint
 DATA_COMMONS_API = "https://api.datacommons.org/v2beta"
 
-@dataclass
-class SupremeCourtCase:
+class SupremeCourtCase(BaseModel):
     """Represents a Supreme Court case in the knowledge graph."""
     dcid: str  # Data Commons ID
     name: str
@@ -27,9 +28,10 @@ class SupremeCourtCase:
     decision_direction: Optional[str] = None  # e.g., "affirmed", "reversed"
     opinion_author: Optional[str] = None
     
-    def to_dict(self) -> Dict[str, Any]:
-        """Convert to dictionary, removing None values."""
-        return {k: v for k, v in asdict(self).items() if v is not None}
+    # Pydantic's model_dump(exclude_none=True) can replace the custom to_dict method.
+    # If you prefer to have a method for this, you can define it as:
+    # def to_dict_custom(self) -> Dict[str, Any]:
+    #     return self.model_dump(exclude_none=True)
 
 class SupremeCourtKG:
     """Knowledge graph client for Supreme Court cases using Data Commons."""
@@ -134,7 +136,7 @@ def save_knowledge_graph(cases: List[SupremeCourtCase], output_path: Path) -> No
     output_path.parent.mkdir(parents=True, exist_ok=True)
     
     with open(output_path, 'w', encoding='utf-8') as f:
-        json.dump([case.to_dict() for case in cases], f, indent=2)
+        json.dump([case.model_dump(exclude_none=True) for case in cases], f, indent=2)
     
     logger.info(f"Saved {len(cases)} cases to {output_path}")
 
@@ -154,3 +156,52 @@ def load_knowledge_graph(input_path: Path) -> List[SupremeCourtCase]:
         data = json.load(f)
     
     return [SupremeCourtCase(**case_data) for case_data in data]
+
+def search_legal_concepts(query: str):
+    """
+    Searches for legal concepts using the FOLIO library.
+
+    Args:
+        query: The search query.
+    """
+    print(f"Initializing FOLIO client...")
+    folio = FOLIO()
+
+    print(f"Searching for concepts related to '{query}'...")
+    results = folio.search_by_label(query)
+    
+    print("Search Results:")
+    for owl_class, score in results:
+        print(f"  Class: {owl_class.label}, Score: {score}")
+        print(f"    Definition: {owl_class.definition}")
+
+
+async def async_search_legal_concepts(query: str):
+    """
+    Searches for legal concepts using the FOLIO library with LLM.
+
+    Args:
+        query: The search query.
+    """
+    print(f"Initializing FOLIO client...")
+    folio = FOLIO()
+
+    print(f"Searching for concepts related to '{query}' with an LLM...")
+    
+    search_sets = [
+        folio.get_areas_of_law(max_depth=2),
+        folio.get_player_actors(max_depth=2),
+    ]
+    
+    print("Search Results (LLM):")
+    async for result in folio.parallel_search_by_llm(query, search_sets=search_sets):
+        print(f"  {result}")
+
+
+if __name__ == '__main__':
+    # Example usage:
+    search_legal_concepts("Constitutional Law")
+
+    # Example async usage
+    print("\n---\n")
+    asyncio.run(async_search_legal_concepts("First Amendment"))

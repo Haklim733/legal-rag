@@ -583,6 +583,7 @@ dependencies = [
     { name = "backoff" },
     { name = "duckdb" },
     { name = "fastavro" },
+    { name = "folio-python" },
     { name = "lightrag-hku" },
     { name = "loguru" },
     { name = "protobuf" },
@@ -617,6 +618,7 @@ requires-dist = [
     { name = "backoff", specifier = ">=2.2.1" },
     { name = "duckdb", specifier = ">=1.2.2" },
     { name = "fastavro", specifier = ">=1.10.0" },
+    { name = "folio-python" },
     { name = "lightrag-hku", specifier = ">=1.3.8" },
     { name = "loguru", specifier = ">=0.7.3" },
     { name = "protobuf", specifier = ">=6.30.0" },
@@ -694,6 +696,20 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/e4/30/eb5dce7994fc71a2f685d98ec33cc660c0a5887db5610137e60d8cbc4489/flatbuffers-25.2.10.tar.gz", hash = "sha256:97e451377a41262f8d9bd4295cc836133415cc03d8cb966410a4af92eb00d26e", size = 22170 }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/b8/25/155f9f080d5e4bc0082edfda032ea2bc2b8fab3f4d25d46c1e9dd22a1a89/flatbuffers-25.2.10-py2.py3-none-any.whl", hash = "sha256:ebba5f4d5ea615af3f7fd70fc310636fbb2bbd1f566ac0a23d98dd412de50051", size = 30953 },
+]
+
+[[package]]
+name = "folio-python"
+version = "0.2.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "httpx" },
+    { name = "lxml" },
+    { name = "pydantic" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/b7/f5/df40415506edd79bd09676dc1dd9f30e4d55403b1f02b7ba4cdb6c5baeb6/folio_python-0.2.0.tar.gz", hash = "sha256:d7e7adf9462288c020a7e005824c632571fa2914dbdc40bdd85f10061d080a43", size = 24118 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/24/44/49899ccd441564b382275ffd57fc024c22d9edecd1ce4c4143765103ccc7/folio_python-0.2.0-py3-none-any.whl", hash = "sha256:9b1c135cb72e10a55d07c2f2b09facc3fe8e6d4aaee4c930f2b227d8daff5dec", size = 24365 },
 ]
 
 [[package]]

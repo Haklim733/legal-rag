@@ -8,6 +8,7 @@ dependencies = [
     "backoff>=2.2.1",
     "duckdb>=1.2.2",
     "fastavro>=1.10.0",
+    "folio-python",
     "loguru>=0.7.3",
     "psutil>=7.0.0",
     "pyarrow>=19.0.1",
