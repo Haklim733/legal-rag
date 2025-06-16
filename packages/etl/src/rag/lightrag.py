@@ -1,7 +1,6 @@
 import os
 import asyncio
 from lightrag import LightRAG, QueryParam
-from lightrag.llm.openai import gpt_4o_mini_complete, gpt_4o_complete, openai_embed
 from lightrag.kg.shared_storage import initialize_pipeline_status
 from lightrag.utils import setup_logger
 
@@ -12,10 +11,21 @@ if not os.path.exists(WORKING_DIR):
     os.mkdir(WORKING_DIR)
 
 async def initialize_rag():
+    # Initialize LightRAG with Hugging Face model
     rag = LightRAG(
         working_dir=WORKING_DIR,
-        embedding_func=openai_embed,
-        llm_model_func=gpt_4o_mini_complete,
+        llm_model_func=hf_model_complete,  # Use Hugging Face model for text generation
+        llm_model_name='meta-llama/Llama-3.1-8B-Instruct',  # Model name from Hugging Face
+        # Use Hugging Face embedding function
+        embedding_func=EmbeddingFunc(
+            embedding_dim=384,
+            max_token_size=5000,
+            func=lambda texts: hf_embed(
+                texts,
+                tokenizer=AutoTokenizer.from_pretrained("sentence-transformers/all-MiniLM-L6-v2"),
+                embed_model=AutoModel.from_pretrained("sentence-transformers/all-MiniLM-L6-v2")
+            )
+        ),
     )
     # IMPORTANT: Both initialization calls are required!
     await rag.initialize_storages()  # Initialize storage backends

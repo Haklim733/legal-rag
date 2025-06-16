@@ -1,21 +1,14 @@
 [project]
-name = "irs"
+name = "etl"
 version = "0.1.0"
-description = "analyze stocks using thetadata"
+description = "etl for rag court cases"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
     "backoff>=2.2.1",
-    "chromadb>=1.0.12",
     "duckdb>=1.2.2",
     "fastavro>=1.10.0",
-    "langchain>=0.3.25",
-    "langchain-chroma>=0.2.4",
-    "langchain-community>=0.3.25",
-    "langchain-openai>=0.3.22",
     "loguru>=0.7.3",
-    "openai>=1.86.0",
-    "pinecone>=7.0.2",
     "psutil>=7.0.0",
     "pyarrow>=19.0.1",
     "pyiceberg[glue,pyarrow,rest-sigv4,s3fs]>=0.9.0",
@@ -23,9 +16,13 @@ dependencies = [
     "requests>=2.32.3",
     "sqlglot[rs]>=26.12.1",
     "sqlmesh>=0.171.2",
-    "tiktoken>=0.9.0",
     "tqdm>=4.67.1",
     "unstructured[pdf]>=0.17.2",
+    "protobuf>=6.30.0",
+    "pydantic>=2.11.5",
+    "pypdf>=5.6.0",
+    "python-dotenv>=1.1.0",
+    "python-multipart>=0.0.20",
 ]
 
 [dependency-groups]
@@ -33,6 +30,7 @@ dev = [
     "ipykernel>=6.29.5",
     "pre-commit>=4.2.0",
     "pytest>=8.3.5",
+    "pytest-asyncio>=1.0.0",
     "pytest-dependency>=0.6.0",
     "snakeviz>=2.2.2",
     "sqlmesh[lsp]>=0.171.2",
@@ -41,6 +39,12 @@ dev = [
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[tool.hatch.build]
+packages = ["src"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src"]
 
 [tool.bandit]
 exclude_dirs = ["tests"]
@@ -59,9 +63,11 @@ module = ["bottle", "boto3", "botocore", "pandas", "botocore.exceptions", "mypy_
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]
+python_files = ["test_*.py"]
 testpaths = [
-    "packages/bhsl/tests",
+    "tests",
 ]
+pythonpath = ["src"]
 addopts = "--ignore=packages/postgres --ignore=packages/functions"
 markers = ["incremental: mark a test as incremental."]
 log_cli = true

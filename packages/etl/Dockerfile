@@ -1,6 +1,7 @@
 FROM python:3.13-slim
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
+RUN sudo apt-get update && sudo apt-get install -y poppler-utils tesseract-ocr-eng
 WORKDIR /app
 
 RUN --mount=type=cache,target=/root/.cache/uv \

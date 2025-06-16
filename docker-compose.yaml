@@ -76,6 +76,27 @@ services:
       - irs_net
 
 # Network configuration
+  # PostgreSQL Database
+  postgres:
+    image: shangor/postgres-for-rag:latest
+    container_name: postgres-rag
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: ragdb
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    networks:
+      - irs_net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+# Network configuration
 networks:
   irs_net:
     driver: bridge
@@ -85,4 +106,6 @@ volumes:
   lightrag_data:
     driver: local
   document_store:
+    driver: local
+  postgres_data:
     driver: local
