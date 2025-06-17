@@ -8,7 +8,7 @@ dependencies = [
     "backoff>=2.2.1",
     "duckdb>=1.2.2",
     "fastavro>=1.10.0",
-    "folio-python",
+    "folio-python[search]",
     "loguru>=0.7.3",
     "psutil>=7.0.0",
     "pyarrow>=19.0.1",
@@ -25,6 +25,11 @@ dependencies = [
     "python-dotenv>=1.1.0",
     "python-multipart>=0.0.20",
     "lightrag-hku>=1.3.8",
+    "instructor>=1.8.3",
+    "alea-llm-client>=0.1.3",
+    "rdflib>=7.1.4",
+    "httpx>=0.28.1",
+    "lxml>=5.4.0",
 ]
 
 [dependency-groups]

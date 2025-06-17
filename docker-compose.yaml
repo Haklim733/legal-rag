@@ -1,102 +1,116 @@
 services:
+  llm:
+    build: ./packages/llm
+    ports:
+      - "8000:8000"
+    networks:
+      court_net:
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [ gpu ]
+    volumes:
+      - ./packages/llm/src/:/app/src
   # LightRAG Core Service
-  lightrag:
-    container_name: lightrag
-    image: ghcr.io/hkuds/lightrag:latest
-    ports:
-      - "9621:9621"  # Default LightRAG port
-    volumes:
-      - ./data/rag_storage:/app/data/rag_storage
-      - ./data/inputs:/app/data/inputs
-      - ./config.ini:/app/config.ini
-      - ./.env:/app/.env
-    env_file:
-      - .env
-    restart: unless-stopped
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-    networks:
-      - irs_net
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9621/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 30s
+  # lightrag:
+  #   container_name: lightrag
+  #   image: ghcr.io/hkuds/lightrag:latest
+  #   ports:
+  #     - "9621:9621"  # Default LightRAG port
+  #   volumes:
+  #     - ./data/rag_storage:/app/data/rag_storage
+  #     - ./data/inputs:/app/data/inputs
+  #     - ./config.ini:/app/config.ini
+  #   # env_file:
+  #   #   - .env
+  #   restart: unless-stopped
+  #   extra_hosts:
+  #     - "host.docker.internal:host-gateway"
+  #   networks:
+  #     - court_net
+  #   healthcheck:
+  #     test: ["CMD", "curl", "-f", "http://localhost:9621/health"]
+  #     interval: 30s
+  #     timeout: 10s
+  #     retries: 3
+  #     start_period: 30s
 
-  # Document Processing Service
-  doc-processor:
-    build:
-      context: ./packages/elt
-      dockerfile: Dockerfile
-    container_name: doc-processor
-    restart: unless-stopped
-    volumes:
-      - ./data/inputs:/app/documents
-      - ./.cache:/root/.cache
-    environment:
-      LIGHTRAG_API_URL: http://lightrag:9621
-      PYTHONUNBUFFERED: 1
-    depends_on:
-      lightrag:
-        condition: service_healthy
-    networks:
-      - irs_net
+  # # Document Processing Service
+  # doc-processor:
+  #   build:
+  #     context: ./packages/elt
+  #     dockerfile: Dockerfile
+  #   container_name: doc-processor
+  #   restart: unless-stopped
+  #   volumes:
+  #     - ./data/inputs:/app/documents
+  #     - ./.cache:/root/.cache
+  #   environment:
+  #     LIGHTRAG_API_URL: http://lightrag:9621
+  #     PYTHONUNBUFFERED: 1
+  #   depends_on:
+  #     lightrag:
+  #       condition: service_healthy
+  #   networks:
+  #     - court_net
 
-  # Web UI (optional)
-  lightrag-ui:
-    image: ghcr.io/hkuds/lightrag-ui:latest
-    container_name: lightrag-ui
-    restart: unless-stopped
-    ports:
-      - "3000:3000"
-    environment:
-      REACT_APP_API_URL: http://lightrag:9621
-    depends_on:
-      lightrag:
-        condition: service_healthy
-    networks:
-      - irs_net
+  # # Web UI (optional)
+  # lightrag-ui:
+  #   image: ghcr.io/hkuds/lightrag-ui:latest
+  #   container_name: lightrag-ui
+  #   restart: unless-stopped
+  #   ports:
+  #     - "3000:3000"
+  #   environment:
+  #     REACT_APP_API_URL: http://lightrag:9621
+  #   depends_on:
+  #     lightrag:
+  #       condition: service_healthy
+  #   networks:
+  #     - court_net
 
-  # Health check and monitoring
-  healthcheck:
-    image: nicolaka/netshoot
-    container_name: healthcheck
-    command: |
-      /bin/sh -c "while true; do
-        curl -f http://lightrag:9621/health || exit 1
-        sleep 30
-      done"
-    depends_on:
-      lightrag:
-        condition: service_healthy
-    networks:
-      - irs_net
+  # # Health check and monitoring
+  # healthcheck:
+  #   image: nicolaka/netshoot
+  #   container_name: healthcheck
+  #   command: |
+  #     /bin/sh -c "while true; do
+  #       curl -f http://lightrag:9621/health || exit 1
+  #       sleep 30
+  #     done"
+  #   depends_on:
+  #     lightrag:
+  #       condition: service_healthy
+  #   networks:
+  #     - court_net
 
 # Network configuration
   # PostgreSQL Database
-  postgres:
-    image: shangor/postgres-for-rag:latest
-    container_name: postgres-rag
-    environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: ragdb
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    ports:
-      - "5432:5432"
-    networks:
-      - court_net 
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
-      interval: 5s
-      timeout: 5s
-      retries: 5
+  # postgres:
+  #   image: shangor/postgres-for-rag:latest
+  #   container_name: postgres-rag
+  #   environment:
+  #     POSTGRES_USER: postgres
+  #     POSTGRES_PASSWORD: postgres
+  #     POSTGRES_DB: ragdb
+  #   volumes:
+  #     - postgres_data:/var/lib/postgresql/data
+  #   ports:
+  #     - "5432:5432"
+  #   networks:
+  #     - court_net 
+  #   healthcheck:
+  #     test: ["CMD-SHELL", "pg_isready -U postgres"]
+  #     interval: 5s
+  #     timeout: 5s
+  #     retries: 5
 
 # Network configuration
 networks:
-  irs_net:
+  court_net:
     driver: bridge
 
 # Volumes for persistent data

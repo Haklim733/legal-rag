@@ -1,6 +1,0 @@
-[env]
-_.file = ".env"
-_.python.venv = { path = "packages/elt/.venv" }
-
-[tools]
-uv = 'latest'
