@@ -237,6 +237,34 @@ class FOLIOExplorer:
             "connections": class_connections,
         }
 
+    def search_ontology(self, text: str) -> Dict:
+        """
+        Search the FOLIO ontology structure using LLM-based semantic matching.
+
+        Args:
+            text (str): The text to search for in the ontology
+
+        Returns:
+            Dict containing matched concepts and their relationships
+        """
+        # Get the full ontology structure
+        structure = self.get_results_structure()
+
+        # Prepare context for LLM
+        context = {
+            "classes": structure["taxonomy"]["classes"],
+            "properties": structure["taxonomy"]["properties"],
+            "connections": structure["connections"],
+            "graph": structure["graph"],
+        }
+
+        # Return the context for LLM processing
+        return {
+            "query": text,
+            "ontology_structure": context,
+            "metadata": structure["metadata"],
+        }
+
     def save_results(
         self, results: Dict, output_dir: Path = Path(".")
     ) -> Dict[str, Path]:

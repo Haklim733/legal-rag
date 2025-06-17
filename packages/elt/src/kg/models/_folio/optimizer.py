@@ -3,6 +3,7 @@ from functools import lru_cache
 import hashlib
 import json
 import os
+from typing import Dict
 
 
 class FOLIOCache:

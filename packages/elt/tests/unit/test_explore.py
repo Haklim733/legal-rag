@@ -256,5 +256,36 @@ def test_identify_classes_without_labels(explorer):
     assert len(classes_without_labels) > 0, "Expected some classes without labels"
 
 
+def test_search_ontology(explorer):
+    """Test searching ontology with LLM-based semantic matching."""
+    # Test with a sample query
+    query = "Facilities Support Services"
+    results = explorer.search_ontology(query)
+
+    # Check basic structure
+    assert isinstance(results, dict)
+    assert "query" in results
+    assert "ontology_structure" in results
+    assert "metadata" in results
+
+    # Check ontology structure
+    structure = results["ontology_structure"]
+    assert "classes" in structure
+    assert "properties" in structure
+    assert "connections" in structure
+    assert "graph" in structure
+
+    # Verify content
+    assert len(structure["classes"]) > 0
+    assert len(structure["properties"]) > 0
+    assert isinstance(structure["connections"], dict)
+    assert "nodes" in structure["graph"]
+    assert "edges" in structure["graph"]
+
+    # Check metadata
+    assert "version" in results["metadata"]
+    assert "timestamp" in results["metadata"]
+
+
 if __name__ == "__main__":
     pytest.main([__file__])
