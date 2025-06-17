@@ -9,14 +9,13 @@ dependencies = [
     "fastapi>=0.115.12",
     "uvicorn[standard]>=0.29.0",
     "python-multipart>=0.0.7",
-    
     # Model and embeddings
-    "sentence-transformers[all]>=4.1.0",  # Includes transformers and torch as dependencies
-    "huggingface-hub>=0.30.0",
-    
+    "sentence-transformers[all]>=4.1.0",
     # Data handling
     "numpy>=2.0.0,<2.2.6",
-    "pydantic>=2.11.5"
+    "pydantic>=2.11.5",
+    "instructor>=1.8.3",
+    "httpx>=0.28.1",
 ]
 
 [project.optional-dependencies]

@@ -74,6 +74,8 @@ python_files = ["test_*.py"]
 testpaths = [
     "tests",
 ]
+asyncio_mode = "auto"
+
 pythonpath = ["src"]
 addopts = "--ignore=packages/postgres --ignore=packages/functions"
 markers = ["incremental: mark a test as incremental."]

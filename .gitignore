@@ -110,3 +110,5 @@ Thumbs.db
 
 #OWL
 *.owl
+
+packages/elt/assets/**/*.json

@@ -1,23 +1,29 @@
 import os
 import time
 from pathlib import Path
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 import numpy as np
 import torch
-from fastapi import FastAPI, HTTPException, status
+from fastapi import FastAPI, HTTPException, status, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field
 from sentence_transformers import SentenceTransformer
-from huggingface_hub import snapshot_download
-
-app = FastAPI(
-    title="LightRAG Embedding Service",
-    description="Hugging Face model service for LightRAG",
-    version="0.1.0"
+from instructor import patch
+from models import (
+    EmbeddingRequest,
+    EmbeddingResponse,
+    ModelInfo,
+    QueryRequest,
+    FOLIOExtraction,
 )
 
-# CORS middleware to allow cross-origin requests
+app = FastAPI(
+    title="Query/Embedding Service",
+    description="Hugging Face model service for LightRAG",
+    version="0.1.0",
+)
+
+# CORS middleware
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -30,161 +36,174 @@ app.add_middleware(
 MODEL_NAME = os.getenv("MODEL_NAME", "sentence-transformers/all-MiniLM-L6-v2")
 MODEL_DEVICE = os.getenv("MODEL_DEVICE", "cuda" if torch.cuda.is_available() else "cpu")
 MODEL_DIR = Path(os.getenv("MODEL_DIR", "models"))
-EMBEDDING_DIM = 384  # Default for all-MiniLM-L6-v2
 
-# Global model instance
+# Global instances
 model = None
+patched_model = None
 
-class EmbeddingRequest(BaseModel):
-    inputs: List[str] = Field(
-        ...,
-        description="List of texts to embed",
-        min_length=1,
-        max_length=100,  # Prevent abuse with too many inputs
-        example=["This is a sample text"]
-    )
+# Cache configuration
+response_cache: Dict[str, FOLIOExtraction] = {}
+CACHE_TTL = 3600  # 1 hour
 
-class EmbeddingResponse(BaseModel):
-    embeddings: List[List[float]] = Field(
-        ...,
-        description="List of embeddings, one for each input text"
-    )
-    model: str = Field(
-        ...,
-        description="Name of the model used for generating embeddings"
-    )
-    dimensions: int = Field(
-        ...,
-        description="Dimensionality of the embedding vectors"
-    )
-
-class ModelInfo(BaseModel):
-    model_id: str = Field(..., description="Identifier of the model")
-    model_type: str = Field(..., description="Type of the model")
-    max_seq_length: int = Field(
-        512,
-        description="Maximum sequence length the model can handle"
-    )
-    embedding_dimension: int = Field(
-        384,
-        description="Dimensionality of the embedding vectors"
-    )
 
 @app.on_event("startup")
 async def load_model():
-    """Load the model at startup using huggingface_hub for better model management."""
-    global model
+    """Load the model at startup"""
+    global model, patched_model
     try:
         start_time = time.time()
-        
+
         # Create model directory if it doesn't exist
         model_path = MODEL_DIR / MODEL_NAME.replace("/", "--")
         model_path.mkdir(parents=True, exist_ok=True)
-        
-        # Check if model is already downloaded, if not download it
-        if not any(model_path.iterdir()):
-            print(f"Downloading model {MODEL_NAME}...")
-            snapshot_download(
-                repo_id=MODEL_NAME,
-                local_dir=model_path,
-                local_dir_use_symlinks=False,
-                ignore_patterns=["*.bin", "*.h5", "*.ot", "*.msgpack"],
-            )
-        
-        # Load the model
+
+        # Load the model - SentenceTransformer handles downloading automatically
         model = SentenceTransformer(
-            str(model_path),
-            device=MODEL_DEVICE,
+            MODEL_NAME, device=MODEL_DEVICE, cache_folder=str(model_path)
         )
-        
+
         # Warm up
         model.encode(["warmup"])
-        
+
+        # Patch for instructor
+        patched_model = patch(model)
+
         load_time = time.time() - start_time
         print(f"Model loaded in {load_time:.2f} seconds")
-        
+
     except Exception as e:
         error_msg = f"Error loading model {MODEL_NAME}: {str(e)}"
         print(error_msg)
         raise RuntimeError(error_msg) from e
 
+
 @app.get("/health")
 async def health_check():
-    """Health check endpoint."""
+    """Health check endpoint"""
     return {
         "status": "healthy",
         "model_loaded": model is not None,
         "model": MODEL_NAME,
-        "device": MODEL_DEVICE
+        "device": MODEL_DEVICE,
     }
+
 
 @app.get("/info")
 async def model_info():
-    """Get model information."""
+    """Get model information"""
     if not model:
         raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Model not loaded"
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Model not loaded"
         )
-    
+
     return ModelInfo(
         model_id=MODEL_NAME,
         model_type="sentence_transformer",
         max_seq_length=model.max_seq_length,
-        embedding_dimension=model.get_sentence_embedding_dimension()
+        embedding_dimension=model.get_sentence_embedding_dimension(),
     )
+
 
 @app.post("/embed", response_model=EmbeddingResponse)
 async def embed_texts(request: EmbeddingRequest):
-    """Generate embeddings for a list of texts."""
+    """Generate embeddings for a list of texts"""
     if not model:
         raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Model not loaded"
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Model not loaded"
         )
-    
+
     try:
-        # Generate embeddings
         embeddings = model.encode(
             request.inputs,
             convert_to_numpy=True,
             normalize_embeddings=True,
             show_progress_bar=False,
-            convert_to_tensor=False
+            convert_to_tensor=False,
         )
-        
-        # Convert numpy arrays to lists
+
         if isinstance(embeddings, np.ndarray):
             embeddings = embeddings.tolist()
-        
+
         return {
             "embeddings": embeddings,
             "model": MODEL_NAME,
-            "dimensions": len(embeddings[0]) if embeddings else 0
+            "dimensions": len(embeddings[0]) if embeddings else 0,
         }
-        
+
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error generating embeddings: {str(e)}"
+            detail=f"Error generating embeddings: {str(e)}",
         )
 
-# For backward compatibility
-@app.post("/embeddings", response_model=EmbeddingResponse)
-async def embeddings_compat(request: EmbeddingRequest):
-    return await embed_texts(request)
+
+@app.post("/query", response_model=FOLIOExtraction)
+async def query_text(
+    request: QueryRequest, background_tasks: BackgroundTasks
+) -> FOLIOExtraction:
+    """Extract FOLIO types from text using instructor-patched model"""
+    if not patched_model:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Model not loaded"
+        )
+
+    try:
+        # Check cache first
+        cache_key = f"{request.text}:{','.join(request.branches or [])}"
+        if cache_key in response_cache:
+            return response_cache[cache_key]
+
+        # Get extraction
+        extraction = await patched_model.complete(
+            request.text,
+            response_model=FOLIOExtraction,
+            system_prompt=f"""
+            You are a FOLIO type extraction expert. Analyze the text and identify all relevant FOLIO types.
+            For each type, provide:
+            1. The exact type name from the available types
+            2. The branch it belongs to
+            3. A confidence score (0-1)
+            4. The relevant context from the text
+            
+            Available types: {FOLIO_TYPES}
+            """,
+        )
+
+        # Cache the result
+        response_cache[cache_key] = extraction
+
+        # Schedule cache cleanup
+        background_tasks.add_task(cleanup_cache)
+
+        return extraction
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error processing query: {str(e)}",
+        )
+
+
+async def cleanup_cache():
+    """Clean up expired cache entries"""
+    current_time = time.time()
+    expired_keys = [
+        key
+        for key, value in response_cache.items()
+        if current_time - value.timestamp > CACHE_TTL
+    ]
+    for key in expired_keys:
+        del response_cache[key]
+
 
 if __name__ == "__main__":
     import uvicorn
-    
-    # Get port from environment or use default
+
     port = int(os.getenv("PORT", 8000))
-    
-    # Start the server
     uvicorn.run(
         app,
         host="0.0.0.0",
         port=port,
         log_level="info",
-        workers=int(os.getenv("WEB_CONCURRENCY", 1))
+        workers=int(os.getenv("WEB_CONCURRENCY", 1)),
     )

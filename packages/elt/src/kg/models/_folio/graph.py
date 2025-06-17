@@ -1,9 +1,9 @@
 """
-folio/graph.py - FOLIO (Federated Open Legal Information Ontology) Python library
+_folio/graph.py - FOLIO (Federated Open Legal Information Ontology) Python library
 
 https://openlegalstandard.org/
 
-This module provides a Python library for working with FOLIO (Federated Open Legal Information Ontology) data.
+This module refactors the folio.graph module to load from local file.
 
 TODO: implement token caching layer in system prompt for search; need upstream support in alea-llm-client first
 """
@@ -33,7 +33,7 @@ import lxml.etree
 from alea_llm_client import BaseAIModel
 
 # project imports
-from folio.config import (
+from _folio.config import (
     DEFAULT_GITHUB_API_URL,
     DEFAULT_GITHUB_OBJECT_URL,
     DEFAULT_GITHUB_REPO_BRANCH,
@@ -42,8 +42,8 @@ from folio.config import (
     DEFAULT_HTTP_URL,
     DEFAULT_SOURCE_TYPE,
 )
-from kg.models.folio.logger import get_logger
-from kg.models.folio.models import OWLClass, OWLObjectProperty, NSMAP
+from kg.models._folio.logger import get_logger
+from kg.models._folio.models import OWLClass, OWLObjectProperty, NSMAP
 
 
 class FOLIOTypes(Enum):

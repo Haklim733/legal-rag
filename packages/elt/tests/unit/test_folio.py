@@ -4,6 +4,7 @@ test_folio.py - Unit tests for FOLIO functionality
 
 import pytest
 from folio import FOLIO
+from typing import List, Tuple, Dict
 
 
 @pytest.fixture

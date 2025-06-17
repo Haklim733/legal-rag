@@ -98,10 +98,10 @@ def test_folio_get_by_alt_label(folio):
 def test_folio_get_properties_by_label(folio):
     """Test getting properties by label."""
     # Test with a known property label
-    test_label = "hasPart"
-    test_label = "Actor / Player"
+    test_label = "folio:authored"
     properties = folio.get_properties_by_label(test_label)
     print(properties)
+    raise
     assert len(properties) > 0
     assert all(isinstance(prop, OWLObjectProperty) for prop in properties)
     assert all(prop.label == test_label for prop in properties)
