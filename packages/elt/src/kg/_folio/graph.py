@@ -25,7 +25,8 @@ import uuid
 from enum import Enum
 from functools import cache
 from pathlib import Path
-from typing import Dict, List, Literal, Optional, Tuple
+from typing import Dict, List, Literal, Optional, Tuple, Set, DefaultDict, deque
+from collections import defaultdict
 
 # packages
 import httpx
@@ -58,7 +59,7 @@ class FOLIOTypes(Enum):
     CURRENCY = "Currency"
     DATA_FORMAT = "Data Format"
     DOCUMENT_ARTIFACT = "Document / Artifact"
-    ENGAGEMENT_TERMS = "Engagement Terms"
+    ENGAGEMENT_ATTRIBUTES = "Engagement Attributes"
     EVENT = "Event"
     FORUMS_VENUES = "Forums and Venues"
     GOVERNMENTAL_BODY = "Governmental Body"
@@ -85,7 +86,7 @@ FOLIO_TYPE_IRIS = {
     FOLIOTypes.CURRENCY: "R767niCLQVC5zIcO5WDQMSl",
     FOLIOTypes.DATA_FORMAT: "R79aItNTJQwHgR002wuX3iC",
     FOLIOTypes.DOCUMENT_ARTIFACT: "RDt4vQCYDfY0R9fZ5FNnTbj",
-    FOLIOTypes.ENGAGEMENT_TERMS: "R9kmGZf5FSmFdouXWQ1Nndm",
+    FOLIOTypes.ENGAGEMENT_ATTRIBUTES: "R9kmGZf5FSmFdouXWQ1Nndm",
     FOLIOTypes.EVENT: "R73hoH1RXYjBTYiGfolpsAF",
     FOLIOTypes.FORUMS_VENUES: "RBjHwNNG2ASVmasLFU42otk",
     FOLIOTypes.GOVERNMENTAL_BODY: "RBQGborh1CfXanGZipDL0Qo",
@@ -1028,7 +1029,7 @@ class FOLIO:
         # build the class edges
         for owl_class in self.classes:
             for parent_class in owl_class.sub_class_of:
-                # skip owl thing
+                # skip owl:Thing
                 if parent_class == OWL_THING:
                     continue
 
@@ -1847,7 +1848,7 @@ class FOLIO:
             List[OWLClass]: The list of engagement terms.
         """
         return self.get_children(
-            FOLIO_TYPE_IRIS[FOLIOTypes.ENGAGEMENT_TERMS], max_depth=max_depth
+            FOLIO_TYPE_IRIS[FOLIOTypes.ENGAGEMENT_ATTRIBUTES], max_depth=max_depth
         )
 
     def get_events(self, max_depth: int = DEFAULT_MAX_DEPTH) -> List[OWLClass]:
@@ -2224,3 +2225,65 @@ class FOLIO:
             return f"https://folio.openlegalstandard.org/{base64_value}"
 
         raise RuntimeError("Failed to generate a unique IRI.")
+
+    def _build_complete_hierarchy(self) -> None:
+        """
+        Build and cache the complete class hierarchy using BFS and topological sorting.
+        This ensures optimal traversal and correct level assignment.
+        """
+        # Step 1: Build adjacency list for direct relationships using class_edges
+        direct_subclass_map = defaultdict(set)
+        in_degree = defaultdict(int)  # Track number of parents for each class
+
+        # Build direct relationships and count in-degrees using class_edges
+        for parent_iri, children in self._folio.class_edges.items():
+            # Skip owl:Thing as it's the root class
+            if parent_iri != "http://www.w3.org/2002/07/owl#Thing":
+                direct_subclass_map[parent_iri] = set(children)
+                for child_iri in children:
+                    in_degree[child_iri] += 1
+
+        # Step 2: Initialize the hierarchy structure
+        self._complete_hierarchy = {}
+
+        # Step 3: BFS to assign levels and build hierarchy
+        def build_hierarchy(start_iri: str) -> Dict[int, Set[str]]:
+            if start_iri in self._complete_hierarchy:
+                return self._complete_hierarchy[start_iri]
+
+            # Initialize level tracking
+            levels = defaultdict(set)
+            visited = set()
+            queue = deque([(start_iri, 0)])  # (node, level)
+
+            while queue:
+                current_iri, level = queue.popleft()
+
+                if current_iri in visited:
+                    continue
+
+                visited.add(current_iri)
+                levels[level].add(current_iri)
+
+                # Add all subclasses to the next level using class_edges
+                for subclass in direct_subclass_map[current_iri]:
+                    if subclass not in visited:
+                        queue.append((subclass, level + 1))
+
+            # Store the hierarchy
+            self._complete_hierarchy[start_iri] = dict(levels)
+            return self._complete_hierarchy[start_iri]
+
+        # Step 4: Build hierarchy for all root classes (classes with no parents)
+        # Skip owl:Thing and only include actual FOLIO classes
+        root_classes = {
+            iri
+            for iri in direct_subclass_map.keys()
+            if in_degree[iri] == 0 and iri != "http://www.w3.org/2002/07/owl#Thing"
+        }
+
+        for root_iri in root_classes:
+            build_hierarchy(root_iri)
+
+
+ENGAGEMENT_ATTRIBUTES = "Engagement Attributes"

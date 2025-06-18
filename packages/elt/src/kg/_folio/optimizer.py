@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 from typing import Dict
+from kg.models._folio.explore import FOLIOExplorer
 
 
 class FOLIOCache:
@@ -16,6 +17,55 @@ class FOLIOCache:
 
     def cache_concept(self, concept_id, concept_data):
         self.concept_cache[concept_id] = concept_data
+
+
+def extract_ontology_concepts(folio_explorer: FOLIOExplorer, email_text: str) -> Dict:
+    """
+    Extract FOLIO ontology concepts from email text using LLM.
+
+    Args:
+        email_text (str): The email text to analyze
+
+    Returns:
+        Dict containing matched FOLIO concepts and their relationships
+    """
+    # Get the complete FOLIO ontology structure
+    ontology_structure = folio_explorer.get_results_structure()
+
+    # Create prompt for LLM to analyze email against ontology
+    prompt = f"""
+    Analyze this email text against the FOLIO ontology structure:
+    
+    Email:
+    {email_text}
+    
+    FOLIO Ontology Structure:
+    - Classes: {ontology_structure['taxonomy']['classes']}
+    - Properties: {ontology_structure['taxonomy']['properties']}
+    - Connections: {ontology_structure['connections']}
+    - Graph: {ontology_structure['graph']}
+    
+    Identify:
+    1. Which FOLIO classes are mentioned or implied in the email
+    2. Which FOLIO properties/relationships exist between these classes
+    3. The hierarchical relationships between identified classes
+    
+    Return the matches in a structured format that maps to the FOLIO ontology.
+    """
+
+    # Here you would:
+    # 1. Send prompt to LLM
+    # 2. Get LLM response
+    # 3. Return structured matches
+
+    return {
+        "email_text": email_text,
+        "matched_concepts": {
+            "classes": [],  # LLM identified FOLIO classes
+            "properties": [],  # LLM identified FOLIO properties
+            "hierarchy": {},  # LLM identified hierarchical relationships
+        },
+    }
 
 
 def optimize_folio_data(folio_data):

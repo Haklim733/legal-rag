@@ -14,6 +14,7 @@ from kg.models.folio.optimizer import (
     FOLIOCache,
     optimized_folio_search,
 )
+from kg.models._folio.explore import FOLIOExplorer
 
 # Load environment variables
 load_dotenv()
@@ -39,6 +40,14 @@ Please let me know if you need any additional information.
 Best regards,
 John Smith
 """
+
+
+@pytest.fixture
+def folio_ontology():
+    """Create a FOLIO ontology instance"""
+    folio_explorer = FOLIOExplorer()
+    folio_ontology = folio_explorer.get_results_structure()
+    return folio_ontology
 
 
 @pytest.fixture
