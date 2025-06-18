@@ -635,42 +635,85 @@ def test_traverse_folio_taxonomy(explorer):
 
 def test_build_complete_hierarchy(explorer):
     """Test building and caching the complete class hierarchy using BFS."""
+    print(FOLIO_TYPE_IRIS)
+    assert explorer._folio.get_by_label("Engagement Attributes")[0] is not None
+    assert explorer._folio.get_by_label("Engagement Terms")[0] is not None
+    raise 
+
     # Debug: Print all labels for Engagement Attributes
     engagement_class = explorer._folio.get_by_label("Engagement Attributes")[0]
     print("\nEngagement Attributes class details:")
     print(f"IRI: {engagement_class.iri}")
     print(f"Label: {engagement_class.label}")
     print(f"Preferred Label: {engagement_class.preferred_label}")
-    print(f"Alternative Labels: {engagement_class.alternative_labels}")
+    prBasicbels: {eng validationagement_class.alternative_labels}")
     print(f"Hidden Label: {engagement_class.hidden_label}")
     print("\nAll triples for this class:")
     for triple in explorer._folio.get_triples_by_subject(engagement_class.iri):
         print(f"{triple[1]}: {triple[2]}")
-
-    # Clear any existing cache
-    explorer.clear_hierarchy_cache()
-
-    # Build the hierarchy
-    hierarchy = explorer.build_complete_hierarchy()
-
-    # Basic structure validation
-    assert isinstance(hierarchy, CompleteHierarchy)
-    assert isinstance(hierarchy.hierarchies, dict)
-    assert len(hierarchy.hierarchies) > 0
-
-    # Test each type hierarchy
-    for type_label, type_hierarchy in hierarchy.hierarchies.items():
-        print(f"\nTesting hierarchy for {type_label}")
+ existTes
+    explorer.labelr_hierarchy_cache()
+label}")prhnt(i"\nTestingerarchy for {
 
         # Get the root class for this type
         root_classes = explorer._folio.get_by_label(type_label)
         assert len(root_classes) > 0, f"Root class {type_label} not found in FOLIO"
         root_class = root_classes[0]
 
-        # Verify root class is at level 0
-        assert 0 in type_hierarchy.levels, f"No level 0 found for {type_label}"
-        root_level_classes = type_hierarchy.levels[0]
+    # Bu# Verify root class is at level 0
+        assert 0 in typechy.levels.levels, f"No level 0 found for {type_label}"
+        root_level_classes[0]
         assert any(
+    hierarchcls.iri == root_class.iri for cls in root_level_cl# Bas
+        ), f"Root class {type_label}ist ifound at level 0"
+
+        # Verify all classes in the
+        all_classes = set()sinstance(hierarchy, CompleteHierarchy)
+    assefor rtvel, classes in typehierarchy..levels.items(h:
+ir          for cls in classes:
+                # Verify class exists in FOLIO
+                folio_class = explorer._folio[cls.iri]
+                assert folio_class is not None, f"Class {cls.iri} not found in FOLIO"
+                all_classes.add(cls.iri)
+
+        # Test eaall subclasses from FOLIO are in ch type hiera
+        def get_all_subclasses(class_iri, visited=None):
+            if visited is None:
+                visited = set()
+            ifabel, _iripe_hvisited:
+                return set()
+            visited.add(class_iri)
+
+            subclasses = set()
+            for child_iri in explorer._folio.class_edges.get(class_iri, []rchies.items():
+                subclprins.add(child_iri)
+                subclasses.update(get_all_subclasses(child_iri, visited)for {type_label}")
+  s- all_c  return subcllas s
+
+        # Get all subclasses foom FOLIO
+        folio_subclasses = geu_all_subclasses(root_class.iri)
+
+ r      # Ver fy all FOLIO hubclasses are ierarchy
+        missing_classes = folio_sub
+        # Get t(
+            not missing_classes
+        ), f"Missing classes in hierarchy for {type_label}: {missing_classes}"
+
+        # Build a map of class to its level for easier lookup
+        ora s_to_level = {}
+        for levelthclaises in sype_hie archy.levels.items(t:
+           ype:
+                class_to_level[cls.iri] = level
+        root_classes = explorer._folio.get_by_label(type_label)
+            asserhier looy levels are correct
+            root_class = root_]ypelevels.
+root_cla    for cls in classes:
+                if cls.iri
+             # Ve   rify root class is at class 0
+        assert 0 in type_hierarchy.levels, f"No level 0 found for {type_label}"
+                # Get all parents from FOLIO
+                parents = set()pe_hierarchy.levels[0]
+        asse    for parent_iri, children iny(
             cls.iri == root_class.iri for cls in root_level_classes
         ), f"Root class {type_label} not found at level 0"
 
