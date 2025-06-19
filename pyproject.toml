@@ -1,0 +1,115 @@
+[project]
+name = "ragextract"
+version = "0.1.0"
+description = "etl for rag court cases"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "backoff>=2.2.1",
+    "folio-python[search]",
+    "loguru>=0.7.3",
+    "psutil>=7.0.0",
+    "pytest-profiling>=1.8.1",
+    "requests>=2.32.3",
+    "tqdm>=4.67.1",
+    "unstructured[pdf]>=0.17.2",
+    "protobuf>=6.30.0",
+    "pydantic>=2.11.5",
+    "pypdf>=5.6.0",
+    "python-dotenv>=1.1.0",
+    "python-multipart>=0.0.20",
+    "lightrag-hku>=1.3.8",
+    "instructor>=1.8.3",
+    "alea-llm-client>=0.1.3",
+    "rdflib>=7.1.4",
+    "httpx>=0.28.1",
+    "lxml>=5.4.0",
+    "nano-vectordb>=0.0.4.3",
+    "pip>=25.1.1",
+    "transformers>=4.0.0",
+    "torch>=2.0.0",
+    "numpy>=1.20.0",
+]
+
+[dependency-groups]
+dev = [
+    "ipykernel>=6.29.5",
+    "pre-commit>=4.2.0",
+    "pytest>=8.3.5",
+    "pytest-asyncio>=1.0.0",
+    "pytest-dependency>=0.6.0",
+    "snakeviz>=2.2.2",
+]
+notebook = [
+    "ipykernel>=6.29.5",
+    "notebook>=7.4.3",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build]
+packages = ["src"]
+include = [
+    "tests/**/*.py",
+    "*.md",
+    "*.txt",
+    "*.ini",
+    "*.yaml",
+    "*.yml",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src"]
+include = [
+    "src/kg/_folio_patched/**/*.py",
+]
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "tests/**/*.py",
+    "*.md",
+    "*.txt",
+    "*.ini",
+    "*.yaml",
+    "*.yml",
+]
+
+[tool.mypy]
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+exclude = ["tests\\.py$", "frontend"]
+
+[[tool.mypy.overrides]]
+module = ["bottle", "boto3", "botocore", "pandas", "botocore.exceptions", "mypy_boto3_s3.type_defs", "mypy_boto3_dynamodb.*",
+"numpy", "requests.*",  "scipy.stats"]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+python_files = ["test_*.py"]
+testpaths = [
+    "tests",
+]
+asyncio_mode = "strict"
+
+pythonpath = ["src", ".", "tests"]
+addopts = "--ignore=packages/postgres --ignore=packages/functions"
+markers = ["incremental: mark a test as incremental."]
+log_cli = true
+log_cli_level = "WARNING"
+log_cli_format = "%(asctime)s [%(levelname)s] %(message)s (%(filename)s:%(lineno)s)"
+log_cli_date_format = "%Y-%m-%d"
+log_date_format = "%Y-%m-%d %H:%M:%S"
+log_format = "%(asctime)s [%(levelname)s] %(message)s (%(filename)s:%(lineno)s)"
+log_level = "INFO"
+
+[tool.pylint]
+ignore-paths="tests|infra/backend/|scripts/unit_tests.py"
+max-line-length = 88
+disable = """
+    too-many-arguments,R0914,C0103,R1728,R0903
+"""

@@ -112,3 +112,14 @@ Thumbs.db
 *.owl
 
 packages/elt/assets/**/*.json
+
+**/notebook
+
+.cursor
+
+logs
+
+ollama
+
+#lightrag
+rag_storage
