@@ -11,7 +11,7 @@ class QueryParam(BaseModel):
     """Configuration parameters for query execution in LightRAG."""
 
     mode: Literal["local", "global", "hybrid", "naive", "mix", "bypass"] = Field(
-        "local", description="Specifies the retrieval mode"
+        "naive", description="Specifies the retrieval mode"
     )
     """Specifies the retrieval mode:
     - "local": Focuses on context-dependent information.

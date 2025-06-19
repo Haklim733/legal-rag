@@ -29,49 +29,49 @@ services:
       timeout: 10s
       retries: 3
       start_period: 30s
-  ollama:
-    image: docker.io/ollama/ollama:latest
-    ports:
-      - 11434:11434
-    volumes:
-      - .:/code
-      - ./ollama/ollama:/root/.ollama
-    container_name: ollama
-    # ... other ollama configurations ...
-    networks:
-      - court_net
-#   PostgreSQL Database
-  postgres:
-    image: shangor/postgres-for-rag:v1.0
-    container_name: postgres-rag
-    environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: ragdb
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    ports:
-      - "5432:5432"
-    networks:
-      - court_net 
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
-      interval: 5s
-      timeout: 5s
-      retries: 5
+#   ollama:
+#     image: docker.io/ollama/ollama:latest
+#     ports:
+#       - 11434:11434
+#     volumes:
+#       - .:/code
+#       - ./ollama/ollama:/root/.ollama
+#     container_name: ollama
+#     # ... other ollama configurations ...
+#     networks:
+#       - court_net
+# #   PostgreSQL Database
+#   postgres:
+#     image: shangor/postgres-for-rag:v1.0
+#     container_name: postgres-rag
+#     environment:
+#       POSTGRES_USER: postgres
+#       POSTGRES_PASSWORD: postgres
+#       POSTGRES_DB: ragdb
+#     volumes:
+#       - postgres_data:/var/lib/postgresql/data
+#     ports:
+#       - "5432:5432"
+#     networks:
+#       - court_net 
+#     healthcheck:
+#       test: ["CMD-SHELL", "pg_isready -U postgres"]
+#       interval: 5s
+#       timeout: 5s
+#       retries: 5
 
-# Network configuration
+# # Network configuration
 networks:
   court_net:
     driver: bridge
 
-# Volumes for persistent data
+# # Volumes for persistent data
 volumes:
   lightrag_data:
     driver: local
-  document_store:
-    driver: local
-  postgres_data:
-    driver: local
-  llm_models:
-    driver: local
+#   document_store:
+#     driver: local
+#   postgres_data:
+#     driver: local
+#   llm_models:
+#     driver: local
