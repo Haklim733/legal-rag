@@ -9,13 +9,14 @@ from folio import FOLIO
 from folio.models import OWLClass, OWLObjectProperty
 
 # Import the ontology functions
-from rag.embed import (
+from src.rag.embed import (
     Document,
     load_ontology_for_rag,
     _create_document_from_owl_class,
     _create_document_from_owl_property,
     _get_children_with_depth,
     _get_class_depth,
+    create_custom_kg,
 )
 
 os.environ["OPENAI_API_KEY"]
@@ -349,3 +350,140 @@ def test_document_text_quality(folio_instance):
         assert len(lines) >= 4  # Should have at least Type, Label, IRI, Definition
 
     print(f"✓ Text quality test passed for {len(documents)} documents")
+
+
+def test_create_custom_kg(folio_instance):
+    """Test create_custom_kg with real FOLIO data."""
+    print("Testing create_custom_kg...")
+
+    # Create custom knowledge graph from FOLIO triples
+    custom_kg = create_custom_kg(folio_instance)
+
+    # Check structure
+    assert hasattr(custom_kg, "chunks")
+    assert hasattr(custom_kg, "entities")
+    assert hasattr(custom_kg, "relationships")
+
+    print(
+        f"Created custom KG with {len(custom_kg.chunks)} chunks, {len(custom_kg.entities)} entities, {len(custom_kg.relationships)} relationships"
+    )
+
+    # Verify we have data
+    assert len(custom_kg.chunks) > 0, "Should have at least some chunks"
+    assert len(custom_kg.entities) > 0, "Should have at least some entities"
+    assert len(custom_kg.relationships) > 0, "Should have at least some relationships"
+
+    # Check chunks structure
+    for i, chunk in enumerate(custom_kg.chunks):
+        assert hasattr(chunk, "content")
+        assert hasattr(chunk, "source_id")
+        assert hasattr(chunk, "chunk_order_index")
+        assert len(chunk.content) > 0
+        assert len(chunk.source_id) > 0
+        # Check that source_id follows expected pattern
+        assert chunk.source_id.startswith("triple_")
+        # Check that chunk_order_index is properly set
+        assert chunk.chunk_order_index == i
+
+    # Check entities structure
+    for entity in custom_kg.entities:
+        assert hasattr(entity, "entity_name")
+        assert hasattr(entity, "entity_type")
+        assert hasattr(entity, "description")
+        assert hasattr(entity, "source_id")
+        assert hasattr(entity, "chunk_ids")
+        assert entity.entity_type == "OWLClass"
+        assert len(entity.entity_name) > 0
+        assert len(entity.description) > 0
+        # Check that entity_name is a clean name (not a full IRI)
+        assert not entity.entity_name.startswith("http")
+        # Check that source_id is a chunk ID (not a full IRI)
+        assert entity.source_id.startswith("triple_")
+        # Check that chunk_ids is a list
+        assert isinstance(entity.chunk_ids, list)
+        # Check that each entity appears in at least one chunk
+        assert len(entity.chunk_ids) > 0
+        # Check that source_id is one of the chunk_ids
+        assert entity.source_id in entity.chunk_ids
+
+    # Check relationships structure
+    for relationship in custom_kg.relationships:
+        assert hasattr(relationship, "src_id")
+        assert hasattr(relationship, "tgt_id")
+        assert hasattr(relationship, "description")
+        assert hasattr(relationship, "keywords")
+        assert hasattr(relationship, "weight")
+        assert hasattr(relationship, "source_id")
+        assert relationship.weight == 1.0
+        assert len(relationship.src_id) > 0
+        assert len(relationship.tgt_id) > 0
+        assert len(relationship.description) > 0
+        # Check that src_id and tgt_id are clean names (not full IRIs)
+        assert not relationship.src_id.startswith("http")
+        assert not relationship.tgt_id.startswith("http")
+        # Check that source_id is a chunk ID
+        assert relationship.source_id.startswith("triple_")
+
+    # Check for uniqueness
+    entity_names = [e.entity_name for e in custom_kg.entities]
+    assert len(entity_names) == len(set(entity_names)), "Entities should be unique"
+
+    chunk_ids = [c.source_id for c in custom_kg.chunks]
+    assert len(chunk_ids) == len(set(chunk_ids)), "Chunks should be unique"
+
+    # Check that relationships reference valid entities
+    valid_entities = set(entity_names)
+    for relationship in custom_kg.relationships:
+        assert (
+            relationship.src_id in valid_entities
+        ), f"Source entity {relationship.src_id} not found in entities"
+        assert (
+            relationship.tgt_id in valid_entities
+        ), f"Target entity {relationship.tgt_id} not found in entities"
+
+    # Check that entities can appear in multiple chunks
+    entity_chunk_counts = {}
+    for entity in custom_kg.entities:
+        entity_chunk_counts[entity.entity_name] = len(entity.chunk_ids)
+
+    # Find entities that appear in multiple chunks
+    multi_chunk_entities = {
+        name: count for name, count in entity_chunk_counts.items() if count > 1
+    }
+    if multi_chunk_entities:
+        print(f"\nEntities appearing in multiple chunks: {multi_chunk_entities}")
+        # Verify that chunk_ids are unique for each entity
+        for entity in custom_kg.entities:
+            if len(entity.chunk_ids) > 1:
+                assert len(entity.chunk_ids) == len(
+                    set(entity.chunk_ids)
+                ), f"Duplicate chunk_ids for entity {entity.entity_name}"
+
+    # Check that chunk content contains meaningful information
+    for chunk in custom_kg.chunks:
+        content = chunk.content
+        # Should contain at least one label and definition
+        assert any(
+            word in content for word in ["relates to", "has", "is", "of", "in", "to"]
+        ), f"Chunk content seems too short: {content[:100]}"
+
+    # Print some sample data for inspection
+    print("\nSample chunk:")
+    print(f"  Content: {custom_kg.chunks[0].content[:200]}...")
+    print(f"  Source ID: {custom_kg.chunks[0].source_id}")
+    print(f"  Source Chunk Index: {custom_kg.chunks[0].chunk_order_index}")
+
+    print("\nSample entity:")
+    sample_entity = custom_kg.entities[0]
+    print(f"  Name: {sample_entity.entity_name}")
+    print(f"  Type: {sample_entity.entity_type}")
+    print(f"  Description: {sample_entity.description[:100]}...")
+
+    print("\nSample relationship:")
+    sample_rel = custom_kg.relationships[0]
+    print(f"  Source: {sample_rel.src_id}")
+    print(f"  Target: {sample_rel.tgt_id}")
+    print(f"  Description: {sample_rel.description}")
+    print(f"  Keywords: {sample_rel.keywords}")
+
+    print("✓ create_custom_kg test passed")

@@ -123,3 +123,5 @@ ollama
 
 #lightrag
 rag_storage
+pgdata
+neo4j_*

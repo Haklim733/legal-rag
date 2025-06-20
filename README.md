@@ -20,3 +20,8 @@ the main.py is the entry point. it will load the ontology and embed it into the 
 the embed.py is the main function to load the ontology and embed it into the document store.
 
 the query_param.py is the main function to query the document store.
+
+## TODO
+1. checkout Langchain LLM Transformers
+2. store in pgsql vector db 
+3. use llm api key

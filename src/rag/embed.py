@@ -7,6 +7,12 @@ from pydantic import BaseModel, Field
 
 from folio import FOLIO
 from folio.models import OWLClass, OWLObjectProperty
+from .models import (
+    CustomKnowledgeGraph,
+    Chunk,
+    Entity,
+    Relationship,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -126,8 +132,13 @@ def _create_document_from_owl_property(owl_prop: OWLObjectProperty) -> Document 
         return None
 
     doc_id = owl_prop.iri
-    label = owl_prop.label or "Unnamed Property"
-    definition = owl_prop.definition or "No definition available."
+    label = owl_prop.preferred_label or owl_prop.label or "Unnamed Property"
+    definition = (
+        owl_prop.definition
+        or owl_prop.description
+        or owl_prop.comment
+        or "No definition available."
+    )
 
     text_content_parts = [
         f"Type: Ontology Property",
@@ -145,6 +156,8 @@ def _create_document_from_owl_property(owl_prop: OWLObjectProperty) -> Document 
         text_content_parts.append(f"Range: {', '.join(owl_prop.range)}")
     if owl_prop.examples:
         text_content_parts.append(f"Examples: {'; '.join(owl_prop.examples)}")
+    if owl_prop.notes:
+        text_content_parts.append(f"Notes: {'; '.join(owl_prop.notes)}")
 
     text_content = "\n".join(text_content_parts)
 
@@ -160,74 +173,37 @@ def _create_document_from_owl_property(owl_prop: OWLObjectProperty) -> Document 
     return Document(id=doc_id, text=text_content, metadata=metadata)
 
 
-def load_ontology_for_rag(limit: int = None, max_depth: int = 2) -> list[Document]:
-    folio_instance = FOLIO("github", llm=None)
-
+def load_ontology_for_rag(limit: int = None, max_depth: int = 2):
+    """Loads ontology data, processes it into Document objects, and returns them along with the FOLIO instance."""
+    logger.info(f"Loading FOLIO ontology with limit={limit}, max_depth={max_depth}")
+    folio_instance = FOLIO()
     documents = []
 
-    # --- Process Classes/Concepts starting from top-level classes with max depth ---
-    print(f"Processing FOLIO classes with max depth {max_depth}...")
-
-    # Get top-level classes (classes that have owl#Thing as their only parent)
-    top_level = [
-        x
-        for x in folio_instance.classes
-        if x.sub_class_of == ["http://www.w3.org/2002/07/owl#Thing"]
-        and x.label
-        not in [
-            "System Identifiers",
-            "ZZZ - SANDBOX: UNDER CONSTRUCTION",
-            "Industry and Market",
-        ]
-    ]
-
-    logger.info(f"Found {len(top_level)} top-level classes")
-
-    # Process each top-level class and its children up to max_depth
-    for top_class in top_level:
-        if limit is not None and len(documents) >= limit:
-            break
-
-        # Add the top-level class itself
-        doc = _create_document_from_owl_class(top_class)
+    # Process classes
+    logger.info(f"Processing {len(folio_instance.classes)} classes...")
+    for owl_class in folio_instance.classes:
+        # Apply depth filtering if max_depth is set
+        # This simple check assumes root classes have no sub_class_of or specific roots are known.
+        # For more complex ontologies, a proper root finding or explicit root list might be needed.
+        # if max_depth is not None and _get_class_depth(folio_instance, owl_class, ???) > max_depth:
+        # continue
+        doc = _create_document_from_owl_class(owl_class)
         if doc:
             documents.append(doc)
 
-        # Get children up to max_depth using get_children
-        children = _get_children_with_depth(folio_instance, top_class, max_depth)
-        for child in children:
-            if limit is not None and len(documents) >= limit:
-                break
-            doc = _create_document_from_owl_class(child)
-            if doc:
-                documents.append(doc)
-                depth = _get_class_depth(folio_instance, child, top_class)
+    # Process properties
+    logger.info(f"Processing {len(folio_instance.properties)} properties...")
+    for owl_prop in folio_instance.properties:
+        doc = _create_document_from_owl_property(owl_prop)
+        if doc:
+            documents.append(doc)
 
-        if limit is not None and len(documents) >= limit:
-            break
+    if limit:
+        logger.info(f"Limiting documents to {limit}")
+        documents = documents[:limit]
 
-    # --- Process Properties/Relationships (limited) ---
-    if limit is None or len(documents) < limit:
-        all_properties = folio_instance.get_all_properties()
-        logger.info(f"Total properties available: {len(all_properties)}")
-
-        # Take only a subset of properties for testing
-        test_properties = all_properties[:20]  # Limit to first 20 properties
-        logger.info(
-            f"Processing {len(test_properties)} OWL object properties from FOLIO..."
-        )
-
-        for owl_prop in test_properties:
-            if limit is not None and len(documents) >= limit:
-                break
-            doc = _create_document_from_owl_property(owl_prop)
-            if doc:
-                documents.append(doc)
-            if limit is not None and len(documents) >= limit:
-                break
-
-    logger.info(f"Prepared a total of {len(documents)} documents for LightRAG.")
-    return documents
+    logger.info(f"Loaded {len(documents)} documents from FOLIO ontology.")
+    return documents, folio_instance
 
 
 def _get_children_with_depth(folio_instance, parent_class, max_depth, current_depth=1):
@@ -279,6 +255,352 @@ def _get_class_depth(folio_instance, target_class, root_class, current_depth=0):
     return min_depth
 
 
+def create_custom_kg(folio_instance: FOLIO) -> CustomKnowledgeGraph:
+    """
+    Creates a custom knowledge graph structure from FOLIO triples.
+    Uses folio[iri] to retrieve definitions and labels for subject and object,
+    and folio.get_property_by_label to get definition and labels of predicates.
+    """
+    chunks = []
+    entities = []
+    relationships = []
+
+    # Track entities we've already added to avoid duplicates
+    added_entities = {}  # entity_name -> Entity object
+    added_chunks = set()
+    chunk_index = 0  # Track chunk index
+
+    logger.info(f"Processing {len(folio_instance.triples)} triples from FOLIO...")
+
+    for subject_iri, predicate_iri, object_iri in folio_instance.triples:
+        try:
+            # Get subject information using folio[iri]
+            if not subject_iri:
+                logger.debug(f"Skipping triple with no subject IRI: {subject_iri}")
+                continue
+
+            subject_info = folio_instance[subject_iri]
+            subj_iri_clean = subject_iri.split("/")[-1]
+            subject_label = (
+                getattr(subject_info, "preferred_label", None)
+                or getattr(subject_info, "label", None)
+                or subj_iri_clean
+            )
+            subject_definition = (
+                getattr(subject_info, "definition", None)
+                or getattr(subject_info, "description", None)
+                or getattr(subject_info, "comment", None)
+                or "No definition available"
+            )
+
+            # Get object information using folio[iri]
+            if not object_iri:
+                logger.debug(f"Skipping triple with no object IRI: {object_iri}")
+                continue
+
+            object_info = folio_instance[object_iri]
+            obj_iri_clean = object_iri.split("/")[-1]
+            object_label = (
+                getattr(object_info, "preferred_label", None)
+                or getattr(object_info, "label", None)
+                or obj_iri_clean
+            )
+            object_definition = (
+                getattr(object_info, "definition", None)
+                or getattr(object_info, "description", None)
+                or getattr(object_info, "comment", None)
+                or "No definition available"
+            )
+
+            # Get predicate information using folio.get_property_by_label
+            predicate_label = None
+            predicate_definition = None
+
+            if predicate_iri:
+                try:
+                    predicate_info = folio_instance.get_property_by_label(predicate_iri)
+                    if predicate_info:
+                        predicate_label = (
+                            getattr(predicate_info, "preferred_label", None)
+                            or getattr(predicate_info, "label", None)
+                            or predicate_iri.split("/")[-1]
+                        )
+                        predicate_definition = (
+                            getattr(predicate_info, "definition", None)
+                            or getattr(predicate_info, "description", None)
+                            or getattr(predicate_info, "comment", None)
+                            or "No definition available"
+                        )
+                except Exception as e:
+                    logger.debug(
+                        f"Could not get predicate info for {predicate_iri}: {e}"
+                    )
+                    predicate_label = predicate_iri.split("/")[-1]
+                    predicate_definition = "No definition available"
+
+            # Create chunk content describing the relationship
+            chunk_content = f"{subject_label} {predicate_label or 'relates to'} {object_label}. {subject_definition} {predicate_definition or ''} {object_definition}"
+            chunk_id = f"triple_{subj_iri_clean}_{predicate_iri.split('/')[-1] if predicate_iri else 'unknown'}_{obj_iri_clean}"
+
+            # Add chunk if not already added
+            if chunk_id not in added_chunks:
+                chunks.append(
+                    Chunk(
+                        content=chunk_content,
+                        source_id=chunk_id,
+                        chunk_order_index=chunk_index,
+                    )
+                )
+                added_chunks.add(chunk_id)
+                chunk_index += 1
+
+            # Add or update subject entity
+            if subj_iri_clean not in added_entities:
+                added_entities[subj_iri_clean] = Entity(
+                    entity_name=subj_iri_clean,  # Use clean name as entity_name
+                    entity_type="OWLClass",
+                    description=subject_definition,
+                    source_id=chunk_id,  # Use chunk_id as source_id for LightRAG
+                    chunk_ids=[chunk_id],
+                )
+            else:
+                # Entity already exists, add this chunk to its list
+                if chunk_id not in added_entities[subj_iri_clean].chunk_ids:
+                    added_entities[subj_iri_clean].chunk_ids.append(chunk_id)
+                # Update source_id to the first chunk this entity appears in
+                if not added_entities[subj_iri_clean].source_id:
+                    added_entities[subj_iri_clean].source_id = chunk_id
+
+            # Add or update object entity
+            if obj_iri_clean not in added_entities:
+                added_entities[obj_iri_clean] = Entity(
+                    entity_name=obj_iri_clean,  # Use clean name as entity_name
+                    entity_type="OWLClass",
+                    description=object_definition,
+                    source_id=chunk_id,  # Use chunk_id as source_id for LightRAG
+                    chunk_ids=[chunk_id],
+                )
+            else:
+                # Entity already exists, add this chunk to its list
+                if chunk_id not in added_entities[obj_iri_clean].chunk_ids:
+                    added_entities[obj_iri_clean].chunk_ids.append(chunk_id)
+                # Update source_id to the first chunk this entity appears in
+                if not added_entities[obj_iri_clean].source_id:
+                    added_entities[obj_iri_clean].source_id = chunk_id
+
+            # Add relationship
+            relationships.append(
+                Relationship(
+                    src_id=subj_iri_clean,  # Use clean name for src_id
+                    tgt_id=obj_iri_clean,  # Use clean name for tgt_id
+                    description=f"{subject_label} {predicate_label or 'relates to'} {object_label}",
+                    keywords=f"{predicate_label or 'relationship'} {subject_label} {object_label}",
+                    weight=1.0,
+                    source_id=chunk_id,  # Use chunk_id as source_id for LightRAG
+                )
+            )
+
+        except Exception as e:
+            logger.warning(
+                f"Error processing triple ({subject_iri}, {predicate_iri}, {object_iri}): {e}"
+            )
+            continue
+
+    # Convert the entities dictionary to a list
+    entities = list(added_entities.values())
+
+    logger.info(
+        f"Created custom KG with {len(chunks)} chunks, {len(entities)} entities, and {len(relationships)} relationships"
+    )
+
+    return CustomKnowledgeGraph(
+        chunks=chunks, entities=entities, relationships=relationships
+    )
+
+
+def create_entities_and_relations_from_folio(folio_instance: FOLIO, rag):
+    """
+    Creates entities and relationships from FOLIO triples using LightRAG's built-in functions.
+    Uses rag.create_entity() and rag.create_relation().
+    """
+    # Track entities we've already created to avoid duplicates
+    created_entities = set()
+
+    logger.info(f"Processing {len(folio_instance.triples)} triples from FOLIO...")
+
+    for subject_iri, predicate_iri, object_iri in folio_instance.triples:
+        try:
+            # Get subject information using folio[iri]
+            if not subject_iri:
+                logger.debug(f"Skipping triple with no subject IRI: {subject_iri}")
+                continue
+
+            subject_info = folio_instance[subject_iri]
+            subj_iri_clean = subject_iri.split("/")[-1]
+            # Use default label instead of preferred_label
+            subject_label = getattr(subject_info, "label", None) or subj_iri_clean
+            subject_definition = (
+                getattr(subject_info, "definition", None)
+                or getattr(subject_info, "description", None)
+                or getattr(subject_info, "comment", None)
+                or "No definition available"
+            )
+
+            # Add preferred label and alternative labels to definition
+            subject_definition_parts = [subject_definition]
+            if (
+                hasattr(subject_info, "preferred_label")
+                and subject_info.preferred_label
+            ):
+                subject_definition_parts.append(
+                    f"Preferred label: {subject_info.preferred_label}"
+                )
+            if (
+                hasattr(subject_info, "alternative_labels")
+                and subject_info.alternative_labels
+            ):
+                alt_labels_str = ", ".join(subject_info.alternative_labels)
+                subject_definition_parts.append(f"Alternative labels: {alt_labels_str}")
+            subject_definition = ". ".join(subject_definition_parts)
+
+            # Get object information using folio[iri]
+            if not object_iri:
+                logger.debug(f"Skipping triple with no object IRI: {object_iri}")
+                continue
+
+            object_info = folio_instance[object_iri]
+            obj_iri_clean = object_iri.split("/")[-1]
+            # Use default label instead of preferred_label
+            object_label = getattr(object_info, "label", None) or obj_iri_clean
+            object_definition = (
+                getattr(object_info, "definition", None)
+                or getattr(object_info, "description", None)
+                or getattr(object_info, "comment", None)
+                or "No definition available"
+            )
+
+            # Add preferred label and alternative labels to definition
+            object_definition_parts = [object_definition]
+            if hasattr(object_info, "preferred_label") and object_info.preferred_label:
+                object_definition_parts.append(
+                    f"Preferred label: {object_info.preferred_label}"
+                )
+            if (
+                hasattr(object_info, "alternative_labels")
+                and object_info.alternative_labels
+            ):
+                alt_labels_str = ", ".join(object_info.alternative_labels)
+                object_definition_parts.append(f"Alternative labels: {alt_labels_str}")
+            object_definition = ". ".join(object_definition_parts)
+
+            # Get predicate information using folio.get_property_by_label
+            predicate_label = None
+            predicate_definition = None
+
+            if predicate_iri:
+                try:
+                    predicate_info = folio_instance.get_property_by_label(predicate_iri)
+                    if predicate_info:
+                        # Use default label instead of preferred_label
+                        predicate_label = (
+                            getattr(predicate_info, "label", None)
+                            or predicate_iri.split("/")[-1]
+                        )
+                        predicate_definition = (
+                            getattr(predicate_info, "definition", None)
+                            or getattr(predicate_info, "description", None)
+                            or getattr(predicate_info, "comment", None)
+                            or "No definition available"
+                        )
+
+                        # Add preferred label and alternative labels to definition
+                        predicate_definition_parts = [predicate_definition]
+                        if (
+                            hasattr(predicate_info, "preferred_label")
+                            and predicate_info.preferred_label
+                        ):
+                            predicate_definition_parts.append(
+                                f"Preferred label: {predicate_info.preferred_label}"
+                            )
+                        if (
+                            hasattr(predicate_info, "alternative_labels")
+                            and predicate_info.alternative_labels
+                        ):
+                            alt_labels_str = ", ".join(
+                                predicate_info.alternative_labels
+                            )
+                            predicate_definition_parts.append(
+                                f"Alternative labels: {alt_labels_str}"
+                            )
+                        predicate_definition = ". ".join(predicate_definition_parts)
+                except Exception as e:
+                    logger.debug(
+                        f"Could not get predicate info for {predicate_iri}: {e}"
+                    )
+                    predicate_label = predicate_iri.split("/")[-1]
+                    predicate_definition = "No definition available"
+
+            # Create subject entity if not already created
+            if subj_iri_clean not in created_entities:
+                entity = rag.create_entity(
+                    subj_iri_clean,
+                    {
+                        "description": subject_definition,
+                        "entity_type": "OWLClass",
+                        "iri": subject_iri,
+                        "label": subject_label,
+                    },
+                )
+                created_entities.add(subj_iri_clean)
+                logger.debug(f"Created entity: {subj_iri_clean}")
+
+            # Create object entity if not already created
+            if obj_iri_clean not in created_entities:
+                entity = rag.create_entity(
+                    obj_iri_clean,
+                    {
+                        "description": object_definition,
+                        "entity_type": "OWLClass",
+                        "iri": object_iri,
+                        "label": object_label,
+                    },
+                )
+                created_entities.add(obj_iri_clean)
+                logger.debug(f"Created entity: {obj_iri_clean}")
+
+            # Create relationship between entities
+            relation_description = (
+                f"{subject_label} {predicate_label or 'relates to'} {object_label}"
+            )
+            relation_keywords = (
+                f"{predicate_label or 'relationship'} {subject_label} {object_label}"
+            )
+
+            rag.create_relation(
+                subj_iri_clean,
+                obj_iri_clean,
+                {
+                    "description": relation_description,
+                    "keywords": relation_keywords,
+                    "weight": 1.0,
+                    "predicate_iri": predicate_iri,
+                    "predicate_label": predicate_label,
+                },
+            )
+
+            logger.debug(f"Created relation: {subj_iri_clean} -> {obj_iri_clean}")
+
+        except Exception as e:
+            logger.warning(
+                f"Error processing triple ({subject_iri}, {predicate_iri}, {object_iri}): {e}"
+            )
+            continue
+
+    logger.info(
+        f"Created {len(created_entities)} entities and processed {len(folio_instance.triples)} relationships"
+    )
+
+
 def main():
     # Determine the base URL for LightRAG API (without /api/v1/load)
     # This is so we can call /health on the same host and port
@@ -295,7 +617,7 @@ def main():
     logger.info("Fetching FOLIO ontology terms for RAG...")
     # When calling from main() in this script, we might not want a limit, or a specific one for testing.
     # For now, let's assume no limit if main() is run directly, or pass a specific one.
-    docs_to_load = load_ontology_for_rag(
+    docs_to_load, folio_instance = load_ontology_for_rag(
         limit=None, max_depth=6
     )  # Or set a specific limit for standalone run e.g. limit=100
 
@@ -331,6 +653,10 @@ def main():
                 logger.error(f"Response content: {e.response.text}")
             logger.error("Stopping further batches due to error.")
             break  # Stop sending further batches if one fails
+
+    # Create custom KG from FOLIO instance and documents
+    custom_kg_data = create_custom_kg(folio_instance)
+    logger.info("Custom KG data created.")
 
 
 if __name__ == "__main__":
