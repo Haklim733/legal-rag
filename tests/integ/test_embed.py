@@ -18,6 +18,7 @@ from src.rag.embed import (
     _get_class_depth,
     create_custom_kg,
 )
+from src.rag.embed import CustomKnowledgeGraph
 
 os.environ["OPENAI_API_KEY"]
 
@@ -487,3 +488,42 @@ def test_create_custom_kg(folio_instance):
     print(f"  Keywords: {sample_rel.keywords}")
 
     print("✓ create_custom_kg test passed")
+
+
+def test_create_custom_kg_from_folio(folio_instance):
+    """
+    Tests that create_custom_kg correctly builds a hierarchical knowledge graph
+    from the FOLIO ontology.
+    """
+    # 1. Act: Generate the knowledge graph
+    kg = create_custom_kg(folio_instance)
+
+    # 2. Assert: Check the basics
+    assert isinstance(kg, CustomKnowledgeGraph)
+    assert kg.entities, "Should create entities"
+    assert kg.chunks, "Should create chunks"
+    assert kg.relationships, "Should create relationships"
+
+    # 3. Assert: Check for specific hierarchical structure
+    entities_by_name = {e.entity_name: e for e in kg.entities}
+    
+    # Check a specific parent-child relationship based on recent changes
+    assert "Public Defender" in entities_by_name, "Entity 'Public Defender' should exist"
+    public_defender_entity = entities_by_name["Public Defender"]
+    assert public_defender_entity.entity_type == "Lawyer", "'Public Defender' should be a subclass of 'Lawyer'"
+
+    # 4. Assert: Check that a corresponding 'is a subclass of' relationship was created
+    relationships_by_src_id = {r.src_id: r for r in kg.relationships}
+    assert public_defender_entity.source_id in relationships_by_src_id, "Relationship for 'Public Defender' should exist"
+    
+    pd_relationship = relationships_by_src_id[public_defender_entity.source_id]
+    lawyer_entity = entities_by_name["Lawyer"]
+    
+    assert pd_relationship.tgt_id == lawyer_entity.source_id, "Relationship target should be the parent entity's source_id"
+    assert "is a subclass of" in pd_relationship.description
+
+    # 5. Assert: Check chunk and entity linking
+    chunks_by_source_id = {c.source_id: c for c in kg.chunks}
+    assert public_defender_entity.source_id in chunks_by_source_id, "A chunk for 'Public Defender' should exist"
+    pd_chunk = chunks_by_source_id[public_defender_entity.source_id]
+    assert public_defender_entity.description in pd_chunk.content, "Entity description should be in its chunk content"

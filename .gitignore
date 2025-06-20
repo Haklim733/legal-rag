@@ -122,6 +122,8 @@ logs
 ollama
 
 #lightrag
-rag_storage
+**/rag_storage
 pgdata
 neo4j_*
+
+**/tmp

@@ -1,7 +1,8 @@
-import os
 import asyncio
-import nest_asyncio
 import logging
+import nest_asyncio
+import os
+from pathlib import Path
 import time
 
 from lightrag import LightRAG
@@ -9,12 +10,8 @@ from lightrag.kg.shared_storage import initialize_pipeline_status
 from lightrag.llm.ollama import ollama_embed, ollama_model_complete
 from lightrag.utils import EmbeddingFunc
 
-
-from lightrag.utils import setup_logger
-
 from .embed import load_ontology_for_rag
 from .models import QueryParam, SAMPLE_KG, SYSTEM_PROMPT
-
 
 nest_asyncio.apply()
 
@@ -26,9 +23,8 @@ if not logger.hasHandlers():
         format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     )
 
-setup_logger("lightrag", level="INFO")
 
-WORKING_DIR = "./rag_storage"
+WORKING_DIR = Path(__file__).parent / "rag_storage"
 if not os.path.exists(WORKING_DIR):
     os.mkdir(WORKING_DIR)
 

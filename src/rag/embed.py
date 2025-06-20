@@ -234,184 +234,80 @@ def _get_children_with_depth(folio_instance, parent_class, max_depth, current_de
 
 
 def _get_class_depth(folio_instance, target_class, root_class, current_depth=0):
-    """Get the depth of a class relative to a root class."""
-    if target_class.iri == root_class.iri:
+    if target_class == root_class:
         return current_depth
-
-    if not target_class.sub_class_of:
-        return float("inf")  # Not reachable from root
-
-    min_depth = float("inf")
-    for parent_iri in target_class.sub_class_of:
-        # Find the parent class
-        for parent_class in folio_instance.classes:
-            if parent_class.iri == parent_iri:
-                depth = _get_class_depth(
-                    folio_instance, parent_class, root_class, current_depth + 1
-                )
-                min_depth = min(min_depth, depth)
-                break
-
-    return min_depth
+    for _, _, super_class in folio_instance.triples_for_class(target_class, "subClassOf"):
+        depth = _get_class_depth(folio_instance, super_class, root_class, current_depth + 1)
+        if depth is not None:
+            return depth
+    return None
 
 
 def create_custom_kg(folio_instance: FOLIO) -> CustomKnowledgeGraph:
     """
-    Creates a custom knowledge graph structure from FOLIO triples.
-    Uses folio[iri] to retrieve definitions and labels for subject and object,
-    and folio.get_property_by_label to get definition and labels of predicates.
+    Creates a custom knowledge graph structure from a FOLIO instance,
+    preserving the class hierarchy.
     """
     chunks = []
     entities = []
     relationships = []
 
-    # Track entities we've already added to avoid duplicates
-    added_entities = {}  # entity_name -> Entity object
-    added_chunks = set()
-    chunk_index = 0  # Track chunk index
+    added_entities = {}  # Cache for created entities: {iri: entity_name}
 
-    logger.info(f"Processing {len(folio_instance.triples)} triples from FOLIO...")
+    # A pass to create all entities first
+    for owl_class in folio_instance.classes:
+        class_iri = str(owl_class.iri)
+        class_name = owl_class.label.replace(" ", "_")
+        entity_source_id = f"entity_{class_name}"
 
-    for subject_iri, predicate_iri, object_iri in folio_instance.triples:
-        try:
-            # Get subject information using folio[iri]
-            if not subject_iri:
-                logger.debug(f"Skipping triple with no subject IRI: {subject_iri}")
-                continue
-
-            subject_info = folio_instance[subject_iri]
-            subj_iri_clean = subject_iri.split("/")[-1]
-            subject_label = (
-                getattr(subject_info, "preferred_label", None)
-                or getattr(subject_info, "label", None)
-                or subj_iri_clean
-            )
-            subject_definition = (
-                getattr(subject_info, "definition", None)
-                or getattr(subject_info, "description", None)
-                or getattr(subject_info, "comment", None)
-                or "No definition available"
-            )
-
-            # Get object information using folio[iri]
-            if not object_iri:
-                logger.debug(f"Skipping triple with no object IRI: {object_iri}")
-                continue
-
-            object_info = folio_instance[object_iri]
-            obj_iri_clean = object_iri.split("/")[-1]
-            object_label = (
-                getattr(object_info, "preferred_label", None)
-                or getattr(object_info, "label", None)
-                or obj_iri_clean
-            )
-            object_definition = (
-                getattr(object_info, "definition", None)
-                or getattr(object_info, "description", None)
-                or getattr(object_info, "comment", None)
-                or "No definition available"
-            )
-
-            # Get predicate information using folio.get_property_by_label
-            predicate_label = None
-            predicate_definition = None
-
-            if predicate_iri:
-                try:
-                    predicate_info = folio_instance.get_property_by_label(predicate_iri)
-                    if predicate_info:
-                        predicate_label = (
-                            getattr(predicate_info, "preferred_label", None)
-                            or getattr(predicate_info, "label", None)
-                            or predicate_iri.split("/")[-1]
-                        )
-                        predicate_definition = (
-                            getattr(predicate_info, "definition", None)
-                            or getattr(predicate_info, "description", None)
-                            or getattr(predicate_info, "comment", None)
-                            or "No definition available"
-                        )
-                except Exception as e:
-                    logger.debug(
-                        f"Could not get predicate info for {predicate_iri}: {e}"
-                    )
-                    predicate_label = predicate_iri.split("/")[-1]
-                    predicate_definition = "No definition available"
-
-            # Create chunk content describing the relationship
-            chunk_content = f"{subject_label} {predicate_label or 'relates to'} {object_label}. {subject_definition} {predicate_definition or ''} {object_definition}"
-            chunk_id = f"triple_{subj_iri_clean}_{predicate_iri.split('/')[-1] if predicate_iri else 'unknown'}_{obj_iri_clean}"
-
-            # Add chunk if not already added
-            if chunk_id not in added_chunks:
-                chunks.append(
-                    Chunk(
-                        content=chunk_content,
-                        source_id=chunk_id,
-                        chunk_order_index=chunk_index,
-                    )
-                )
-                added_chunks.add(chunk_id)
-                chunk_index += 1
-
-            # Add or update subject entity
-            if subj_iri_clean not in added_entities:
-                added_entities[subj_iri_clean] = Entity(
-                    entity_name=subj_iri_clean,  # Use clean name as entity_name
-                    entity_type="OWLClass",
-                    description=subject_definition,
-                    source_id=chunk_id,  # Use chunk_id as source_id for LightRAG
-                    chunk_ids=[chunk_id],
-                )
-            else:
-                # Entity already exists, add this chunk to its list
-                if chunk_id not in added_entities[subj_iri_clean].chunk_ids:
-                    added_entities[subj_iri_clean].chunk_ids.append(chunk_id)
-                # Update source_id to the first chunk this entity appears in
-                if not added_entities[subj_iri_clean].source_id:
-                    added_entities[subj_iri_clean].source_id = chunk_id
-
-            # Add or update object entity
-            if obj_iri_clean not in added_entities:
-                added_entities[obj_iri_clean] = Entity(
-                    entity_name=obj_iri_clean,  # Use clean name as entity_name
-                    entity_type="OWLClass",
-                    description=object_definition,
-                    source_id=chunk_id,  # Use chunk_id as source_id for LightRAG
-                    chunk_ids=[chunk_id],
-                )
-            else:
-                # Entity already exists, add this chunk to its list
-                if chunk_id not in added_entities[obj_iri_clean].chunk_ids:
-                    added_entities[obj_iri_clean].chunk_ids.append(chunk_id)
-                # Update source_id to the first chunk this entity appears in
-                if not added_entities[obj_iri_clean].source_id:
-                    added_entities[obj_iri_clean].source_id = chunk_id
-
-            # Add relationship
-            relationships.append(
-                Relationship(
-                    src_id=subj_iri_clean,  # Use clean name for src_id
-                    tgt_id=obj_iri_clean,  # Use clean name for tgt_id
-                    description=f"{subject_label} {predicate_label or 'relates to'} {object_label}",
-                    keywords=f"{predicate_label or 'relationship'} {subject_label} {object_label}",
-                    weight=1.0,
-                    source_id=chunk_id,  # Use chunk_id as source_id for LightRAG
-                )
-            )
-
-        except Exception as e:
-            logger.warning(
-                f"Error processing triple ({subject_iri}, {predicate_iri}, {object_iri}): {e}"
-            )
+        if class_iri in added_entities:
             continue
 
-    # Convert the entities dictionary to a list
-    entities = list(added_entities.values())
+        # Create a chunk for the entity's definition
+        definition = getattr(owl_class, 'definition', 'No definition available.')
+        chunk_content = definition
+        chunk = Chunk(
+            content=chunk_content,
+            source_id=entity_source_id,
+            chunk_order_index=0
+        )
+        chunks.append(chunk)
 
-    logger.info(
-        f"Created custom KG with {len(chunks)} chunks, {len(entities)} entities, and {len(relationships)} relationships"
-    )
+        # Determine parent class for entity_type
+        parent_name = "FOLIO_BRANCH"  # Default for root classes
+        parent_source_id = None
+        try:
+            # This assumes a simple, single-inheritance hierarchy for entity_type
+            parents = folio_instance.get_parent_classes(owl_class)
+            if parents:
+                parent_class = parents[0]
+                parent_name = parent_class.label
+                parent_source_id = f"entity_{parent_name.replace(' ', '_')}"
+
+        except Exception as e:
+            logger.warning(f"Could not determine parent for {class_name}: {e}")
+
+        entity = Entity(
+            entity_name=owl_class.label,
+            entity_type=parent_name,
+            description=definition,
+            source_id=entity_source_id,
+            chunk_ids=[entity_source_id]
+        )
+        entities.append(entity)
+        added_entities[class_iri] = entity_source_id
+
+        # Create relationship to parent
+        if parent_source_id:
+            relationship = Relationship(
+                src_id=entity_source_id,
+                tgt_id=parent_source_id,
+                description=f"{owl_class.label} is a subclass of {parent_name}.",
+                keywords="is a, subclass of",
+                weight=1.0,
+                source_id=entity_source_id, # Link relationship to the child entity
+            )
+            relationships.append(relationship)
 
     return CustomKnowledgeGraph(
         chunks=chunks, entities=entities, relationships=relationships
