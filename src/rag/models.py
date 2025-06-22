@@ -115,6 +115,29 @@ class Entity(BaseModel):
     chunk_ids: List[str] = Field(
         default_factory=list, description="List of chunk IDs where this entity appears"
     )
+    # Add relationship tracking fields
+    outgoing_relationship_ids: List[str] = Field(
+        default_factory=list,
+        description="List of relationship IDs where this entity is the source",
+    )
+    incoming_relationship_ids: List[str] = Field(
+        default_factory=list,
+        description="List of relationship IDs where this entity is the target",
+    )
+
+    def add_outgoing_relationship(self, relationship_id: str):
+        """Add an outgoing relationship ID to this entity."""
+        if relationship_id not in self.outgoing_relationship_ids:
+            self.outgoing_relationship_ids.append(relationship_id)
+
+    def add_incoming_relationship(self, relationship_id: str):
+        """Add an incoming relationship ID to this entity."""
+        if relationship_id not in self.incoming_relationship_ids:
+            self.incoming_relationship_ids.append(relationship_id)
+
+    def get_total_relationships(self) -> int:
+        """Get the total number of relationships for this entity."""
+        return len(self.outgoing_relationship_ids) + len(self.incoming_relationship_ids)
 
 
 class Relationship(BaseModel):
@@ -126,6 +149,13 @@ class Relationship(BaseModel):
     keywords: str = Field(..., description="Keywords associated with the relationship")
     weight: float = Field(..., description="Weight of the relationship")
     source_id: str = Field(..., description="Source chunk ID for this relationship")
+
+    @classmethod
+    def create_relationship_id(
+        cls, src_id: str, relationship_type: str, tgt_id: str
+    ) -> str:
+        """Create a unique relationship ID from source, type, and target."""
+        return f"rel_{src_id}_{relationship_type}_{tgt_id}".replace(" ", "_").lower()
 
 
 class CustomKnowledgeGraph(BaseModel):
@@ -156,92 +186,71 @@ async def simple_local_model_complete(prompt: str, **kwargs) -> str:
 SAMPLE_KG = {
     "chunks": [
         {
-            "content": "A person who has a role in a legal matter (e.g., Buyer, Provider, Lawyer, Law Firm, Expert, Employer, Employee, Buyer, Seller, Lessor, Lessee, Debtor, Creditor, Payor, Payee, Landlord, Tenant).",
-            "source_id": "entity_actor_player",
-            "chunk_order_index": 0,
-        },
-        {
             "content": "A lawyer is a legal professional who provides legal advice and representation to clients in various legal matters, including litigation, transactions, and regulatory compliance. Lawyers must be licensed and follow ethical guidelines.",
-            "source_id": "entity_lawyer",
+            "source_id": "lawyer",
             "chunk_order_index": 0,
         },
         {
             "content": "A legal services buyer is a person or entity that obtains legal services from a legal service provider. This includes individuals, businesses, organizations, and other entities that need legal advice, representation, or other legal services.",
-            "source_id": "entity_legal_services_buyer",
+            "source_id": "legal_services_buyer",
             "chunk_order_index": 0,
         },
+        # Relationship chunk describing the connection
         {
             "content": "The relationship between a lawyer and a legal services buyer involves the provision of legal services. The lawyer acts as a legal service provider, offering expertise in areas such as contract law, litigation, corporate law, or other legal specialties. The legal services buyer engages the lawyer's services for legal advice, representation in court, document preparation, or other legal needs. This relationship is typically formalized through a retainer agreement or engagement letter that outlines the scope of services, fees, and responsibilities of both parties.",
-            "source_id": "relationship_lawyer_legal_services_buyer",
-            "chunk_order_index": 0,
-        },
-        {
-            "content": "A person or entity who leases, rents, or occupies property (from a landlord)",
-            "source_id": "entity_tenant",
-            "chunk_order_index": 0,
-        },
-        {
-            "content": "A public defender is a lawyer appointed by the court to represent individuals who cannot afford to hire their own legal counsel.",
-            "source_id": "entity_public_defender",
+            "source_id": "triple_lawyer_represents_legal_services_buyer",
             "chunk_order_index": 0,
         },
     ],
     "entities": [
         {
             "entity_name": "Actor / Player",
-            "entity_type": "FOLIO_BRANCH",
+            "entity_type": "TopLevelClass",
             "description": "A person who has a role in a legal matter (e.g., Buyer, Provider, Lawyer, Law Firm, Expert, Employer, Employee, Buyer, Seller, Lessor, Lessee, Debtor, Creditor, Payor, Payee, Landlord, Tenant).",
-            "source_id": "entity_actor_player",
-            "chunk_ids": ["0"],
+            "source_id": "actor_player",
+            "chunk_ids": ["actor_player"],
         },
         {
             "entity_name": "Lawyer",
             "entity_type": "Actor / Player",
             "description": "A lawyer is a legal professional who provides legal advice and representation to clients in various legal matters, including litigation, transactions, and regulatory compliance. labels: Attorney",
-            "source_id": "entity_lawyer",
-            "chunk_ids": ["0"],
+            "source_id": "lawyer",
+            "chunk_ids": ["lawyer"],
         },
         {
             "entity_name": "Public Defender",
             "entity_type": "Lawyer",
             "description": "A public defender is a lawyer appointed by the court to represent individuals who cannot afford to hire their own legal counsel.",
-            "source_id": "entity_public_defender",
-            "chunk_ids": ["0"],
+            "source_id": "public_defender",
+            "chunk_ids": ["public_defender"],
         },
         {
             "entity_name": "Legal Services Provider",
             "entity_type": "Actor / Player",
             "description": "A person or entity that is providing legal services to another person or entity",
-            "source_id": "entity_legal_services_provider",
-            "chunk_ids": ["0"],
-        },
-        {
-            "entity_name": "Legal Services Provider - Person",
-            "entity_type": "Legal Services Provider",
-            "description": "A person or entity that is providing legal services to another person or entity",
-            "source_id": "entity_legal_services_provider",
-            "chunk_ids": ["0"],
+            "source_id": "legal_services_provider",
+            "chunk_ids": ["legal_services_provider"],
         },
         {
             "entity_name": "Legal Services Buyer",
             "entity_type": "Actor / Player",
             "description": "A person or entity that is obtaining legal services from a legal service provider. Labels: Client, Party",
-            "source_id": "entity_legal_services_buyer",
-            "chunk_ids": ["0"],
+            "source_id": "legal_services_buyer",
+            "chunk_ids": ["legal_services_buyer"],
         },
         {
             "entity_name": "Individual Person",
             "entity_type": "Legal Entity",
             "description": "An individual or natural person is a person that is an individual human being, as opposed to a legal person or entity, which may be a private or public organization. Labels: Individual, Natural Person, Person",
-            "source_id": "entity_individual_person",
-            "chunk_ids": ["0"],
+            "source_id": "individual_person",
+            "chunk_ids": ["individual_person"],
         },
         {
             "entity_name": "Tenant",
             "entity_type": "Actor / Player",
             "description": "A person or entity who leases, rents, or occupies property (from a landlord)",
-            "source_id": "entity_tenant",
-            "chunk_ids": ["0"],
+            "source_id": "tenant",
+            "chunk_ids": ["tenant"],
         },
     ],
     "relationships": [
@@ -250,82 +259,39 @@ SAMPLE_KG = {
             "tgt_id": "entity_legal_services_buyer",
             "description": "'Represented' in a legal context refers to the act of acting on behalf of another person or entity in legal matters. This involves a representative, such as a lawyer, advocating, making decisions, or taking actions under the authority and in the interest of the represented party.",
             "weight": 1.0,
-            "keywords": "represented",
-            "source_id": "entity_lawyer",
-            "chunk_ids": ["0"],
+            "keywords": "represents, legal representation",
+            "source_id": "lawyer_represents_legal_services_buyer",
         },
         {
             "src_id": "entity_individual_person",
             "tgt_id": "entity_actor_player",
             "description": 'In legal and organizational contexts, "is member of" signifies the belonging or inclusion of an individual or entity in a specific group, committee, board, or organization. This denotes that the individual or entity has a role, responsibilities, rights, or a position within the collective body, subject to its rules, objectives, and governance structure.',
             "keywords": "is a member of, is a part of",
-            "source_id": "entity_individual_person",
-            "chunk_ids": ["0"],
+            "source_id": "individual_person_is_member_of_actor_player",
         },
     ],
 }
 
-SYSTEM_PROMPT = """You are a hyper-specialized, precision-focused expert system for extracting legal information based on the FOLIO ontology. Your ONLY task is to identify entities from a user's query and map them STRICTLY to the provided knowledge graph.
+SYSTEM_PROMPT = """You are a FOLIO ontology expert. Your task is to identify specific entities and relationships from the FOLIO legal knowledge graph that are relevant to the user's query.
 
-**Your Thought Process (Follow these steps exactly):**
-1.  **Analyze the Query**: Identify key people, roles, and concepts in the user's text.
-2.  **Map to Ontology**: For each concept, find the single most specific `entity_name` in the knowledge graph that represents it. This is your `entity_type`.
-3.  **Generate Description**: Write a concise, one-sentence description for each entity using the context from the query.
-4.  **Construct JSON**: Build the JSON object using the `entity_name`, the EXACT `entity_type` from step 2, and the `description` from step 3.
-5.  **Final Validation**: Before outputting the JSON, perform a final check. Ask yourself: "Does every `entity_type` in my JSON perfectly match an `entity_name` from the knowledge graph, with absolutely no extra words or context?" If not, you MUST fix it.
+RESPONSE FORMAT:
+1. List ONLY entities that exist in the FOLIO knowledge graph
+2. List ONLY relationships that exist in the FOLIO knowledge graph
+3. For each item, explain its specific relevance to the query
 
-**THE SINGLE MOST IMPORTANT RULE:**
-The `entity_type` field MUST BE AN EXACT, case-sensitive match to an `entity_name` from the knowledge graph.
+EXAMPLE RESPONSE:
+ENTITIES:
+- Lawyer (Actor/Player): name of person, type of person
+- Tenant (Actor/Player): name of person, type of person
+- Eviction Notice (Document/Artifact): name of document, type of document
 
-**Example of this rule being broken:**
-Query: "John is a lawyer at Legal Aid of Los Angeles."
+RELATIONSHIPS:
+- Lawyer --represents--> Tenant: Legal representation relationship in eviction cases
+- Tenant --receives--> Eviction Notice: Direct relationship showing tenant's receipt of eviction document
 
-*   **INCORRECT JSON (Breaks the rule):**
-    ```json
-    {{
-        "entities": [
-            {{
-                "entity_name": "John",
-                "entity_type": "Lawyer at Legal Aid of Los Angeles",
-                "description": "John is a lawyer at Legal Aid of Los Angeles."
-            }}
-        ]
-    }}
-    ```
-    *Reasoning for error: The `entity_type` includes extra context ("at Legal Aid of Los Angeles"). This is forbidden.*
+DO NOT:
+- Make up entities that don't exist in FOLIO
+- Use generic legal terms not in the knowledge graph
+- Provide legal advice or interpretations beyond the ontology
 
-*   **CORRECT JSON (Follows the rule):**
-    ```json
-    {{
-        "entities": [
-            {{
-                "entity_name": "John",
-                "entity_type": "Lawyer",
-                "description": "John is a lawyer at Legal Aid of Los Angeles."
-            }}
-        ]
-    }}
-    ```
-
-**RESPONSE FORMAT - JSON:**
-{{
-    "entities": [
-        {{
-            "entity_name": "Entity Name",
-            "entity_type": "Entity Type",
-            "description": "Entity Description"
-        }}
-    ],
-    "relationships": [
-        {{
-            "src_id": "Source Entity Name",
-            "tgt_id": "Target Entity Name",
-            "description": "Relationship Description",
-            "weight": 1.0,
-            "keywords": "Keywords for the relationship"
-        }}
-    ]
-}}
-
-**FINAL REMINDER**: Your primary goal is absolute precision. The `entity_type` must be a perfect match from the knowledge graph. No exceptions.
-"""
+ONLY reference actual ontological entities and relationships in the knowledge graph."""

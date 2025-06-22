@@ -28,6 +28,8 @@ WORKING_DIR = Path(__file__).parent / "rag_storage"
 if not os.path.exists(WORKING_DIR):
     os.mkdir(WORKING_DIR)
 
+def clear_cache(working_dir: Path = WORKING_DIR):
+    os.remove(working_dir / "kv_store_llm_response_cache.json")
 
 async def initialize_rag():
     rag = LightRAG(
@@ -60,12 +62,12 @@ async def initialize_rag():
 
 
 def main_query():
-    logger.info("--- Testing RAG Query ---")
 
     # Initialize RAG
-    logger.info("Initializing RAG...")
     rag = asyncio.run(initialize_rag())
     logger.info(f"Initialized RAG object: {rag}")
+    clear_cache()
+    
 
     # Load FOLIO ontology data
     logger.info("Loading FOLIO ontology data...")

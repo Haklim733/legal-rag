@@ -598,6 +598,7 @@ def test_create_supreme_court_case_from_pdf():
             opinion_author="Per Curiam",
             case_type="per_curiam",
         )
+        print(case)
 
         # Validate the case was created successfully
         assert isinstance(
