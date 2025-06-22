@@ -32,6 +32,11 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
+# Install curl for health checks
+RUN apt-get update && apt-get install -y \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
 # Copy only necessary files from builder
 COPY --from=builder /root/.local /root/.local
 COPY ./lightrag ./lightrag
@@ -47,7 +52,6 @@ RUN mkdir -p /app/data/rag_storage /app/data/inputs
 # Docker data directories
 ENV WORKING_DIR=/app/data/rag_storage
 ENV INPUT_DIR=/app/data/inputs
-
 
 # 5. Copy the dependency files and install dependencies
 # This layer is cached by Docker, so dependencies are only re-installed when they change.

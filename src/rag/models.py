@@ -1,6 +1,6 @@
 from typing import Callable, Optional, List, Literal
 import os
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 import json
 import logging
 
@@ -173,6 +173,208 @@ class CustomKnowledgeGraph(BaseModel):
         }
 
 
+SYSTEM_PROMPT = """You are an expert legal knowledge graph analyzer. Extract ONLY the core legal entities and relationships mentioned in the input text.
+
+CRITICAL: You MUST respond with ONLY a valid JSON object. No additional text, explanations, or formatting outside the JSON structure.
+
+{{REQUIRED JSON FORMAT}}:
+{{
+    "entities": [
+        {{
+            "entity_name": "entity_name",
+            "entity_type": "entity_type",
+            "description": "brief description from the text",
+            "weight": 0.85,
+        }}
+    ],
+    "relationships": [
+        {{
+            "src_id": "subject",
+            "tgt_id": "object",
+            "description": "brief description from the text",
+            "keywords": "keywords from the text",
+            "weight": 0.85,
+        }}
+    ],
+}}
+
+
+EXTRACTION RULES:
+1. Extract ONLY entities and relationships explicitly mentioned in the input text
+2. Use the exact names/terms from the text (e.g., "Lawyer" not "Agent/Role")
+3. Keep descriptions brief and based on the text context
+4. Do NOT add FOLIO ontology explanations or verbose descriptions
+5. Do NOT include classes or properties unless explicitly mentioned in the knowledge graph
+6. weight should be a measure of confidence in the match between text and the entries found in the knowledge graph
+7. src_id should be the subject of the relationship and tgt_id should be the object
+8. keywords should ONLY be words/phrases from the knowledge graph - DO NOT make up keywords
+9. If you're unsure about a keyword, use a simple action word from the text that closely matches the knowledge graph and assign a value to weight based on how closely it matches the knowledge graph
+
+EXAMPLES:
+- Input: "A lawyer represents a client"
+- Entity: "Lawyer" (not "Actor/Player")
+- Entity: "Client" (not "Actor/Player") 
+- Relationship: "represented"
+- Description: actual text from the input
+
+
+IMPORTANT RULES:
+- Respond with ONLY the JSON object, no other text
+- Use exact terms from the input text
+- Keep descriptions concise and relevant
+- Avoid FOLIO ontology jargon in descriptions
+- If no concepts found, return empty arrays but maintain JSON structure
+- NEVER invent keywords that don't exist in the knowledge graph"""
+
+
+class RAGResponse(BaseModel):
+    """Validated response structure for RAG queries containing ontological concepts."""
+
+    query_text: str = Field(..., description="Original query text")
+    response_text: str = Field(..., description="Generated response text")
+    entities_found: List[Entity] = Field(..., description="Entities found in the query")
+    relationships_found: List[Relationship] = Field(
+        ..., description="Relationships found in the query"
+    )
+    confidence_summary: dict = Field(..., description="Summary of confidence scores")
+    total_concepts: int = Field(
+        ..., description="Total number of ontological concepts found"
+    )
+
+    @field_validator("confidence_summary")
+    @classmethod
+    def validate_confidence_summary(cls, v):
+        """Validate confidence summary structure."""
+        required_keys = [
+            "entities",
+            "relationships",
+            "overall",
+        ]
+        for key in required_keys:
+            if key not in v:
+                raise ValueError(f"Missing required key '{key}' in confidence_summary")
+            if not isinstance(v[key], (int, float)) or v[key] < 0 or v[key] > 1:
+                raise ValueError(
+                    f"Confidence score for '{key}' must be between 0.0 and 1.0"
+                )
+        return v
+
+    @field_validator("total_concepts")
+    @classmethod
+    def validate_total_concepts(cls, v, values):
+        """Validate that total_concepts matches the sum of all concept types."""
+        if (
+            "entities_found" in values.data
+            and "relationships_found" in values.data
+            and "classes_found" in values.data
+            and "properties_found" in values.data
+        ):
+            calculated_total = len(values.data["entities_found"]) + len(
+                values.data["relationships_found"]
+            )
+            if v != calculated_total:
+                raise ValueError(
+                    f"total_concepts ({v}) does not match sum of individual concept types ({calculated_total})"
+                )
+        return v
+
+
+def validate_rag_response(response_text: str, query_text: str) -> RAGResponse:
+    """
+    Validate and parse RAG response to ensure it contains proper ontological concepts.
+
+    Args:
+        response_text: Raw response text from RAG
+        query_text: Original query text
+
+    Returns:
+        RAGResponse: Validated response structure
+
+    Raises:
+        ValueError: If response doesn't contain valid JSON structure
+        ValidationError: If response doesn't meet ontological concept requirements
+    """
+    import json
+    import re
+
+    # Try to extract JSON from response
+    json_match = re.search(r"\{.*\}", response_text, re.DOTALL)
+    if not json_match:
+        raise ValueError("Response does not contain valid JSON structure")
+
+    try:
+        response_data = json.loads(json_match.group())
+    except json.JSONDecodeError as e:
+        raise ValueError(f"Invalid JSON in response: {e}")
+
+    # Extract ontological concepts from response
+    entities = []
+    relationships = []
+
+    # Parse entities
+    if "entities" in response_data:
+        for entity_data in response_data["entities"]:
+            entities.append(
+                Entity(
+                    entity_name=entity_data.get("entity_name", ""),
+                    entity_type=entity_data.get("entity_type", "entity"),
+                    description=entity_data.get("description", ""),
+                    source_id=entity_data.get("source_id", ""),
+                    chunk_ids=entity_data.get("chunk_ids", []),
+                    outgoing_relationship_ids=entity_data.get(
+                        "outgoing_relationship_ids", []
+                    ),
+                    incoming_relationship_ids=entity_data.get(
+                        "incoming_relationship_ids", []
+                    ),
+                )
+            )
+
+    # Parse relationships
+    if "relationships" in response_data:
+        for rel_data in response_data["relationships"]:
+            # Validate keywords against knowledge graph
+            keywords = rel_data.get("keywords", "")
+            if not validate_keywords_against_kg(keywords):
+                logger.warning(
+                    f"Invalid keywords found: {keywords}. Valid keywords: {get_valid_keywords_from_kg()}"
+                )
+
+            relationships.append(
+                Relationship(
+                    src_id=rel_data.get("src_id", ""),
+                    tgt_id=rel_data.get("tgt_id", ""),
+                    description=rel_data.get("description", ""),
+                    keywords=rel_data.get("keywords", ""),
+                    weight=rel_data.get("weight", 0.5),
+                    source_id=rel_data.get("source_id", ""),
+                )
+            )
+
+    # Calculate confidence summary
+    def avg_confidence(concepts):
+        if not concepts:
+            return 0.0
+        return sum(c.confidence_score for c in concepts) / len(concepts)
+
+    confidence_summary = {
+        "entities": avg_confidence(entities),
+        "relationships": avg_confidence(relationships),
+        "overall": avg_confidence(entities + relationships),
+    }
+
+    total_concepts = len(entities) + len(relationships)
+
+    return RAGResponse(
+        query_text=query_text,
+        response_text=response_text,
+        entities_found=entities,
+        relationships_found=relationships,
+        confidence_summary=confidence_summary,
+        total_concepts=total_concepts,
+    )
+
+
 async def simple_local_model_complete(prompt: str, **kwargs) -> str:
     logger.info(f"Local model received prompt: {prompt[:100]}...")
     # Example: return a JSON string with keywords
@@ -259,39 +461,54 @@ SAMPLE_KG = {
             "tgt_id": "entity_legal_services_buyer",
             "description": "'Represented' in a legal context refers to the act of acting on behalf of another person or entity in legal matters. This involves a representative, such as a lawyer, advocating, making decisions, or taking actions under the authority and in the interest of the represented party.",
             "weight": 1.0,
-            "keywords": "represents, legal representation",
+            "keywords": "represents, legal representation, advises, counsels",
             "source_id": "lawyer_represents_legal_services_buyer",
         },
         {
             "src_id": "entity_individual_person",
             "tgt_id": "entity_actor_player",
             "description": 'In legal and organizational contexts, "is member of" signifies the belonging or inclusion of an individual or entity in a specific group, committee, board, or organization. This denotes that the individual or entity has a role, responsibilities, rights, or a position within the collective body, subject to its rules, objectives, and governance structure.',
-            "keywords": "is a member of, is a part of",
+            "keywords": "is a member of, is a part of, belongs to, works for, employed by",
             "source_id": "individual_person_is_member_of_actor_player",
+        },
+        {
+            "src_id": "entity_tenant",
+            "tgt_id": "entity_landlord",
+            "description": "A tenant rents or leases property from a landlord under a rental agreement.",
+            "weight": 1.0,
+            "keywords": "rents from, leases from, pays rent to, occupies property of",
+            "source_id": "tenant_rents_from_landlord",
+        },
+        {
+            "src_id": "entity_landlord",
+            "tgt_id": "entity_tenant",
+            "description": "A landlord owns property that is rented or leased to a tenant.",
+            "weight": 1.0,
+            "keywords": "rents to, leases to, owns property rented by, provides housing for",
+            "source_id": "landlord_rents_to_tenant",
         },
     ],
 }
 
-SYSTEM_PROMPT = """You are a FOLIO ontology expert. Your task is to identify specific entities and relationships from the FOLIO legal knowledge graph that are relevant to the user's query.
 
-RESPONSE FORMAT:
-1. List ONLY entities that exist in the FOLIO knowledge graph
-2. List ONLY relationships that exist in the FOLIO knowledge graph
-3. For each item, explain its specific relevance to the query
+def get_valid_keywords_from_kg() -> List[str]:
+    """Get all valid keywords from the knowledge graph to prevent hallucination."""
+    valid_keywords = []
+    for rel in SAMPLE_KG["relationships"]:
+        keywords = rel.get("keywords", "").split(", ")
+        valid_keywords.extend(keywords)
+    return list(set(valid_keywords))  # Remove duplicates
 
-EXAMPLE RESPONSE:
-ENTITIES:
-- Lawyer (Actor/Player): name of person, type of person
-- Tenant (Actor/Player): name of person, type of person
-- Eviction Notice (Document/Artifact): name of document, type of document
 
-RELATIONSHIPS:
-- Lawyer --represents--> Tenant: Legal representation relationship in eviction cases
-- Tenant --receives--> Eviction Notice: Direct relationship showing tenant's receipt of eviction document
+def validate_keywords_against_kg(keywords: str) -> bool:
+    """Validate that keywords exist in the knowledge graph."""
+    if not keywords:
+        return True
 
-DO NOT:
-- Make up entities that don't exist in FOLIO
-- Use generic legal terms not in the knowledge graph
-- Provide legal advice or interpretations beyond the ontology
+    valid_keywords = get_valid_keywords_from_kg()
+    provided_keywords = [k.strip() for k in keywords.split(", ")]
 
-ONLY reference actual ontological entities and relationships in the knowledge graph."""
+    for keyword in provided_keywords:
+        if keyword not in valid_keywords:
+            return False
+    return True

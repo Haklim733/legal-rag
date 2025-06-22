@@ -4,40 +4,15 @@ from unstructured.partition.pdf import partition_pdf
 from unstructured.documents.elements import Text, Title, NarrativeText, ListItem, Table
 import pypdf
 import logging
-from dataclasses import dataclass
-from enum import Enum
 from datetime import datetime
-import json
-from .models import (
-    SupremeCourtCase,
-    PDFDocumentMetadata,
-    ExtractionMetadata,
-    CaseDocumentMetadata,
+from src.docs.models import (
+    ExtractionMethod,
+    UnstructuredStrategy,
+    ExtractionResult,
+    PDFExtractionResult,
 )
 
 logger = logging.getLogger(__name__)
-
-
-class ExtractionMethod(Enum):
-    """Available PDF text extraction methods."""
-
-    UNSTRUCTURED = "unstructured"
-    PYPDF = "pypdf"
-    UNSTRUCTURED_FAST = "unstructured_fast"
-    UNSTRUCTURED_HIERARCHICAL = "unstructured_hierarchical"
-
-
-@dataclass
-class ExtractionResult:
-    """Result of PDF text extraction."""
-
-    full_text: str
-    elements: List[Dict[str, Any]]
-    metadata: Dict[str, Any]
-    success: bool
-    method: str
-    pages_processed: int
-    error_message: Optional[str] = None
 
 
 def extract_text_unstructured(
@@ -48,7 +23,7 @@ def extract_text_unstructured(
     method_name: str = "unstructured",
 ) -> ExtractionResult:
     """
-    Extract text using unstructured library with hierarchical structure preservation.
+    Extract text using unstructured library with configurable strategy and hierarchy preservation.
 
     Args:
         pdf_path: Path to the PDF file
@@ -267,63 +242,23 @@ def extract_text_pypdf(
         )
 
 
-def extract_text_unstructured_fast(
-    pdf_path: Path, max_pages: Optional[int] = None
-) -> ExtractionResult:
-    """
-    Extract text using unstructured library with fast strategy.
-
-    Args:
-        pdf_path: Path to the PDF file
-        max_pages: Maximum number of pages to process (None for all pages)
-
-    Returns:
-        ExtractionResult with structured text and metadata
-    """
-    return extract_text_unstructured(
-        pdf_path=pdf_path,
-        max_pages=max_pages,
-        strategy="fast",
-        preserve_hierarchy=False,
-        method_name="unstructured_fast",
-    )
-
-
-def extract_text_unstructured_hierarchical(
-    pdf_path: Path, max_pages: Optional[int] = None
-) -> ExtractionResult:
-    """
-    Extract text using unstructured library with maximum hierarchy preservation.
-
-    Args:
-        pdf_path: Path to the PDF file
-        max_pages: Maximum number of pages to process (None for all pages)
-
-    Returns:
-        ExtractionResult with structured text and metadata
-    """
-    return extract_text_unstructured(
-        pdf_path=pdf_path,
-        max_pages=max_pages,
-        strategy="hi_res",
-        preserve_hierarchy=True,
-        method_name="unstructured_hierarchical",
-    )
-
-
 def extract_text_from_pdf(
     pdf_path: Path,
-    method: Union[ExtractionMethod, str] = ExtractionMethod.UNSTRUCTURED_HIERARCHICAL,
+    method: Union[ExtractionMethod, str] = ExtractionMethod.UNSTRUCTURED,
     max_pages: Optional[int] = None,
+    strategy: Optional[UnstructuredStrategy] = UnstructuredStrategy.FAST,
+    preserve_hierarchy: bool = True,
     **kwargs,
 ) -> ExtractionResult:
     """
-    Extract text from PDF using the specified method.
+    Extract text from PDF using the specified method with configurable parameters.
 
     Args:
         pdf_path: Path to the PDF file
-        method: Extraction method to use
+        method: Extraction method to use (default: unstructured)
         max_pages: Maximum number of pages to process (None for all pages)
+        strategy: Strategy for unstructured extraction ("hi_res", "fast", "ocr_only")
+        preserve_hierarchy: Whether to preserve document hierarchy
         **kwargs: Additional arguments for the extraction method
 
     Returns:
@@ -332,33 +267,220 @@ def extract_text_from_pdf(
     if isinstance(method, str):
         method = ExtractionMethod(method)
 
-    method_map = {
-        ExtractionMethod.UNSTRUCTURED: extract_text_unstructured,
-        ExtractionMethod.PYPDF: extract_text_pypdf,
-        ExtractionMethod.UNSTRUCTURED_FAST: extract_text_unstructured_fast,
-        ExtractionMethod.UNSTRUCTURED_HIERARCHICAL: extract_text_unstructured_hierarchical,
-    }
+    # Convert strategy string to UnstructuredStrategy enum if needed
+    if method == ExtractionMethod.UNSTRUCTURED and isinstance(strategy, str):
+        try:
+            strategy = UnstructuredStrategy(strategy)
+        except ValueError:
+            # Default to fast if invalid strategy provided
+            strategy = UnstructuredStrategy.FAST
 
-    extractor_func = method_map.get(method)
-    if not extractor_func:
+    if method == ExtractionMethod.UNSTRUCTURED:
+        if strategy is None:
+            strategy = UnstructuredStrategy.FAST
+        return extract_text_unstructured(
+            pdf_path=pdf_path,
+            max_pages=max_pages,
+            strategy=strategy.value,
+            preserve_hierarchy=preserve_hierarchy,
+            method_name=(
+                f"unstructured_{strategy.value}"
+                if strategy.value != "hi_res"
+                else "unstructured"
+            )
+            + ("_no_hierarchy" if not preserve_hierarchy else ""),
+        )
+    elif method == ExtractionMethod.PYPDF:
+        return extract_text_pypdf(
+            pdf_path=pdf_path,
+            max_pages=max_pages,
+            preserve_hierarchy=preserve_hierarchy,
+        )
+    else:
         raise ValueError(f"Unknown extraction method: {method}")
 
-    return extractor_func(pdf_path, max_pages=max_pages, **kwargs)
 
-
-def process_pdf_directory(
-    pdf_dir: Path,
-    method: Union[ExtractionMethod, str] = ExtractionMethod.UNSTRUCTURED_HIERARCHICAL,
+def extract_pdf(
+    pdf_path: Path,
+    method: Union[ExtractionMethod, str] = ExtractionMethod.UNSTRUCTURED,
     max_pages: Optional[int] = None,
+    strategy: str = "fast",
+    preserve_hierarchy: bool = True,
+    extract_metadata: bool = True,
+    **kwargs,
+) -> PDFExtractionResult:
+    """
+    Extract text and metadata from PDF using the specified method.
+
+    This is a unified function that handles both text and metadata extraction
+    using the same method selection approach.
+
+    Args:
+        pdf_path: Path to the PDF file
+        method: Extraction method to use (default: unstructured)
+        max_pages: Maximum number of pages to process (None for all pages)
+        strategy: Strategy for unstructured extraction ("hi_res", "fast", "ocr_only")
+        preserve_hierarchy: Whether to preserve document hierarchy
+        extract_metadata: Whether to extract metadata (default: True)
+        **kwargs: Additional arguments for the extraction method
+
+    Returns:
+        PDFExtractionResult with both text and metadata results
+    """
+    if isinstance(method, str):
+        method = ExtractionMethod(method)
+
+    # Convert strategy string to UnstructuredStrategy enum
+    strategy_enum = None
+    if method == ExtractionMethod.UNSTRUCTURED:
+        try:
+            strategy_enum = UnstructuredStrategy(strategy)
+        except ValueError:
+            # Default to fast if invalid strategy provided
+            strategy_enum = UnstructuredStrategy.FAST
+
+    try:
+        # Extract text
+        text_result = extract_text_from_pdf(
+            pdf_path=pdf_path,
+            method=method,
+            max_pages=max_pages,
+            strategy=strategy_enum if strategy_enum else UnstructuredStrategy.FAST,
+            preserve_hierarchy=preserve_hierarchy,
+            **kwargs,
+        )
+
+        # Extract metadata if requested
+        metadata_result = {}
+        if extract_metadata:
+            metadata_result = extract_pdf_metadata(
+                pdf_path=pdf_path,
+                method=method,
+                strategy=strategy,
+            )
+
+        # Determine overall success
+        success = text_result.success and (
+            not extract_metadata or metadata_result.get("success", False)
+        )
+
+        # Use the method name from the text result since it already reflects the configuration
+        method_name = text_result.method
+
+        return PDFExtractionResult(
+            text_result=text_result,
+            metadata_result=metadata_result,
+            success=success,
+            method=method_name,
+        )
+
+    except Exception as e:
+        logger.error(
+            f"Error in unified PDF extraction for {pdf_path}: {str(e)}", exc_info=True
+        )
+        return PDFExtractionResult(
+            text_result=ExtractionResult(
+                full_text="",
+                elements=[],
+                metadata={},
+                success=False,
+                method=str(method),
+                pages_processed=0,
+                error_message=str(e),
+            ),
+            metadata_result={"success": False, "error": str(e)},
+            success=False,
+            method=str(method),
+            error_message=str(e),
+        )
+
+
+def process_pdf_directory_unified(
+    pdf_dir: Path,
+    method: Union[ExtractionMethod, str] = ExtractionMethod.UNSTRUCTURED,
+    max_pages: Optional[int] = None,
+    strategy: str = "fast",
+    preserve_hierarchy: bool = True,
+    extract_metadata: bool = True,
     **kwargs,
 ) -> List[Dict[str, Any]]:
     """
-    Process all PDFs in a directory using the specified method.
+    Process all PDFs in a directory using the unified extraction method.
 
     Args:
         pdf_dir: Directory containing PDF files
         method: Extraction method to use
         max_pages: Maximum number of pages to process per PDF (None for all pages)
+        strategy: Strategy for unstructured extraction ("hi_res", "fast", "ocr_only")
+        preserve_hierarchy: Whether to preserve document hierarchy
+        extract_metadata: Whether to extract metadata (default: True)
+        **kwargs: Additional arguments for the extraction method
+
+    Returns:
+        List of dictionaries containing processing results for each PDF
+    """
+    if not pdf_dir.is_dir():
+        raise ValueError(f"{pdf_dir} is not a valid directory")
+
+    results = []
+    for pdf_path in pdf_dir.glob("*.pdf"):
+        try:
+            result = extract_pdf(
+                pdf_path=pdf_path,
+                method=method,
+                max_pages=max_pages,
+                strategy=strategy,
+                preserve_hierarchy=preserve_hierarchy,
+                extract_metadata=extract_metadata,
+                **kwargs,
+            )
+
+            results.append(
+                {
+                    "file": str(pdf_path),
+                    "text": result.text_result.full_text,
+                    "elements": result.text_result.elements,
+                    "text_metadata": result.text_result.metadata,
+                    "pdf_metadata": result.metadata_result,
+                    "success": result.success,
+                    "method": result.method,
+                    "pages_processed": result.text_result.pages_processed,
+                    "error_message": result.error_message,
+                }
+            )
+        except Exception as e:
+            logger.error(f"Failed to process {pdf_path}: {str(e)}")
+            results.append(
+                {
+                    "file": str(pdf_path),
+                    "error": str(e),
+                    "success": False,
+                    "method": str(method),
+                    "pages_processed": 0,
+                }
+            )
+
+    return results
+
+
+def process_pdf_directory(
+    pdf_dir: Path,
+    method: Union[ExtractionMethod, str] = ExtractionMethod.UNSTRUCTURED,
+    max_pages: Optional[int] = None,
+    strategy: str = "fast",
+    preserve_hierarchy: bool = True,
+    **kwargs,
+) -> List[Dict[str, Any]]:
+    """
+    Process all PDFs in a directory using the specified method and parameters.
+    (Legacy function - consider using process_pdf_directory_unified for better results)
+
+    Args:
+        pdf_dir: Directory containing PDF files
+        method: Extraction method to use
+        max_pages: Maximum number of pages to process per PDF (None for all pages)
+        strategy: Strategy for unstructured extraction ("hi_res", "fast", "ocr_only")
+        preserve_hierarchy: Whether to preserve document hierarchy
         **kwargs: Additional arguments for the extraction method
 
     Returns:
@@ -371,7 +493,12 @@ def process_pdf_directory(
     for pdf_path in pdf_dir.glob("*.pdf"):
         try:
             result = extract_text_from_pdf(
-                pdf_path=pdf_path, method=method, max_pages=max_pages, **kwargs
+                pdf_path=pdf_path,
+                method=method,
+                max_pages=max_pages,
+                strategy=strategy,
+                preserve_hierarchy=preserve_hierarchy,
+                **kwargs,
             )
 
             results.append(
@@ -401,48 +528,172 @@ def process_pdf_directory(
     return results
 
 
-def compare_extraction_methods(
-    pdf_path: Path, max_pages: Optional[int] = None
-) -> Dict[str, ExtractionResult]:
+def extract_pdf_metadata(
+    pdf_path: Path,
+    method: Union[ExtractionMethod, str] = ExtractionMethod.UNSTRUCTURED,
+    strategy: str = "fast",
+) -> Dict[str, Any]:
     """
-    Compare different extraction methods on the same PDF.
+    Extract metadata from a PDF file using the specified method.
 
     Args:
         pdf_path: Path to the PDF file
-        max_pages: Maximum number of pages to process (None for all pages)
+        method: Extraction method to use (default: unstructured)
+        strategy: Strategy for unstructured extraction ("hi_res", "fast", "ocr_only")
 
     Returns:
-        Dictionary mapping method names to their results
+        Dictionary containing PDF metadata
     """
-    methods = [
-        ExtractionMethod.UNSTRUCTURED_HIERARCHICAL,
-        ExtractionMethod.UNSTRUCTURED_FAST,
-        ExtractionMethod.PYPDF,
-    ]
+    if isinstance(method, str):
+        method = ExtractionMethod(method)
 
-    results = {}
-    for method in methods:
-        try:
-            result = extract_text_from_pdf(pdf_path, method=method, max_pages=max_pages)
-            results[method.value] = result
-        except Exception as e:
-            logger.error(f"Failed to extract with {method.value}: {str(e)}")
-            results[method.value] = ExtractionResult(
-                full_text="",
-                elements=[],
-                metadata={},
-                success=False,
-                method=method.value,
-                pages_processed=0,
-                error_message=str(e),
+    if method == ExtractionMethod.UNSTRUCTURED:
+        return extract_pdf_metadata_unstructured(pdf_path, strategy)
+    elif method == ExtractionMethod.PYPDF:
+        return extract_pdf_metadata_pypdf(pdf_path)
+    else:
+        raise ValueError(f"Unknown extraction method: {method}")
+
+
+def extract_pdf_metadata_unstructured(
+    pdf_path: Path, strategy: str = "fast"
+) -> Dict[str, Any]:
+    """
+    Extract metadata from a PDF file using unstructured library.
+
+    Args:
+        pdf_path: Path to the PDF file
+        strategy: Strategy for unstructured extraction ("hi_res", "fast", "ocr_only")
+
+    Returns:
+        Dictionary containing PDF metadata
+    """
+    try:
+        # Use unstructured to get document metadata
+        elements = partition_pdf(
+            filename=str(pdf_path),
+            strategy=strategy,
+            include_page_breaks=False,
+            max_partition=1,  # Only need first page for metadata
+        )
+
+        metadata = {
+            "total_elements": len(elements),
+            "file_path": str(pdf_path),
+            "file_name": pdf_path.name,
+            "file_size_bytes": pdf_path.stat().st_size,
+            "extraction_method": "unstructured",
+            "extraction_strategy": strategy,
+        }
+
+        # Extract metadata from elements
+        if elements:
+            first_element = elements[0]
+            if hasattr(first_element, "metadata"):
+                element_metadata = first_element.metadata
+                if hasattr(element_metadata, "filename"):
+                    metadata["filename"] = element_metadata.filename
+                if hasattr(element_metadata, "page_number"):
+                    metadata["first_page"] = element_metadata.page_number
+
+                # Extract additional metadata if available
+                for attr in dir(element_metadata):
+                    if not attr.startswith("_") and not callable(
+                        getattr(element_metadata, attr)
+                    ):
+                        value = getattr(element_metadata, attr)
+                        if value is not None:
+                            metadata[f"element_{attr}"] = str(value)
+            else:
+                logger.warning(
+                    f"No element metadata found in unstructured extraction for PDF: {pdf_path}"
+                )
+        else:
+            logger.warning(
+                f"No elements extracted from PDF using unstructured: {pdf_path}"
             )
 
-    return results
+        # Try to get additional metadata using PyPDF as fallback for standard PDF metadata
+        try:
+            with open(pdf_path, "rb") as file:
+                pdf_reader = pypdf.PdfReader(file)
+
+                # Add basic PDF properties
+                metadata["total_pages"] = len(pdf_reader.pages)
+                metadata["is_encrypted"] = pdf_reader.is_encrypted
+                metadata["pdf_version"] = str(pdf_reader.pdf_header)
+
+                # Extract standard PDF metadata if available
+                if pdf_reader.metadata:
+                    standard_fields = [
+                        "/Title",
+                        "/Author",
+                        "/Subject",
+                        "/Keywords",
+                        "/Creator",
+                        "/Producer",
+                        "/CreationDate",
+                        "/ModDate",
+                    ]
+
+                    for field in standard_fields:
+                        if field in pdf_reader.metadata:
+                            value = pdf_reader.metadata[field]
+                            clean_key = field[1:] if field.startswith("/") else field
+                            metadata[f"pdf_{clean_key.lower()}"] = str(value)
+
+                    # Parse dates if available
+                    if "pdf_creationdate" in metadata:
+                        try:
+                            date_str = metadata["pdf_creationdate"]
+                            if date_str.startswith("D:"):
+                                date_str = date_str[2:]
+                                year = int(date_str[:4])
+                                month = int(date_str[4:6])
+                                day = int(date_str[6:8])
+                                creation_date = datetime(year, month, day)
+                                metadata["creation_date_parsed"] = (
+                                    creation_date.isoformat()
+                                )
+                        except (ValueError, IndexError):
+                            pass
+
+                    if "pdf_moddate" in metadata:
+                        try:
+                            date_str = metadata["pdf_moddate"]
+                            if date_str.startswith("D:"):
+                                date_str = date_str[2:]
+                                year = int(date_str[:4])
+                                month = int(date_str[4:6])
+                                day = int(date_str[6:8])
+                                mod_date = datetime(year, month, day)
+                                metadata["modification_date_parsed"] = (
+                                    mod_date.isoformat()
+                                )
+                        except (ValueError, IndexError):
+                            pass
+
+        except Exception as e:
+            logger.warning(f"Could not extract PyPDF metadata as fallback: {str(e)}")
+
+        return {"success": True, "metadata": metadata, "file_path": str(pdf_path)}
+
+    except Exception as e:
+        logger.error(
+            f"Error extracting metadata with unstructured from {pdf_path}: {str(e)}",
+            exc_info=True,
+        )
+        return {
+            "success": False,
+            "error": str(e),
+            "file_path": str(pdf_path),
+            "metadata": {},
+        }
 
 
-def extract_pdf_metadata(pdf_path: Path) -> Dict[str, Any]:
+def extract_pdf_metadata_pypdf(pdf_path: Path) -> Dict[str, Any]:
     """
-    Extract metadata from a PDF file using PyPDF.
+    Extract metadata from a PDF file using PyPDF (legacy method).
 
     Args:
         pdf_path: Path to the PDF file
@@ -455,7 +706,15 @@ def extract_pdf_metadata(pdf_path: Path) -> Dict[str, Any]:
             pdf_reader = pypdf.PdfReader(file)
 
             # Get document info (metadata)
-            metadata = {}
+            metadata = {
+                "extraction_method": "pypdf",
+                "file_path": str(pdf_path),
+                "file_name": pdf_path.name,
+                "file_size_bytes": pdf_path.stat().st_size,
+                "total_pages": len(pdf_reader.pages),
+                "is_encrypted": pdf_reader.is_encrypted,
+                "pdf_version": str(pdf_reader.pdf_header),
+            }
 
             if pdf_reader.metadata:
                 # Standard PDF metadata fields
@@ -476,21 +735,15 @@ def extract_pdf_metadata(pdf_path: Path) -> Dict[str, Any]:
                         value = pdf_reader.metadata[field]
                         # Remove the leading slash for cleaner keys
                         clean_key = field[1:] if field.startswith("/") else field
-                        metadata[clean_key] = str(value)
+                        metadata[clean_key.lower()] = str(value)
             else:
                 logger.warning(f"No metadata found in PDF: {pdf_path}")
 
-            # Add document properties
-            metadata["total_pages"] = len(pdf_reader.pages)
-            metadata["file_size_bytes"] = pdf_path.stat().st_size
-            metadata["file_path"] = str(pdf_path)
-            metadata["file_name"] = pdf_path.name
-
             # Try to extract creation and modification dates
-            if "CreationDate" in metadata:
+            if "creationdate" in metadata:
                 try:
                     # PDF dates are in format: D:YYYYMMDDHHmmSSOHH'mm'
-                    date_str = metadata["CreationDate"]
+                    date_str = metadata["creationdate"]
                     if date_str.startswith("D:"):
                         date_str = date_str[2:]  # Remove 'D:' prefix
                         # Parse year, month, day
@@ -504,9 +757,9 @@ def extract_pdf_metadata(pdf_path: Path) -> Dict[str, Any]:
             else:
                 logger.warning(f"No CreationDate found in PDF metadata: {pdf_path}")
 
-            if "ModDate" in metadata:
+            if "moddate" in metadata:
                 try:
-                    date_str = metadata["ModDate"]
+                    date_str = metadata["moddate"]
                     if date_str.startswith("D:"):
                         date_str = date_str[2:]
                         year = int(date_str[:4])
@@ -519,18 +772,12 @@ def extract_pdf_metadata(pdf_path: Path) -> Dict[str, Any]:
             else:
                 logger.warning(f"No ModDate found in PDF metadata: {pdf_path}")
 
-            # Check if PDF is encrypted
-            metadata["is_encrypted"] = pdf_reader.is_encrypted
-
-            # Get PDF version
-            metadata["pdf_version"] = str(pdf_reader.pdf_header)
-
             # Warn if no standard metadata fields were found
             standard_metadata_count = sum(
                 1
                 for key in metadata.keys()
                 if key
-                in ["Title", "Author", "Subject", "Keywords", "Creator", "Producer"]
+                in ["title", "author", "subject", "keywords", "creator", "producer"]
             )
             if standard_metadata_count == 0:
                 logger.warning(
@@ -549,209 +796,3 @@ def extract_pdf_metadata(pdf_path: Path) -> Dict[str, Any]:
             "file_path": str(pdf_path),
             "metadata": {},
         }
-
-
-def extract_pdf_metadata_with_unstructured(pdf_path: Path) -> Dict[str, Any]:
-    """
-    Extract metadata from a PDF file using unstructured library.
-
-    Args:
-        pdf_path: Path to the PDF file
-
-    Returns:
-        Dictionary containing PDF metadata
-    """
-    try:
-        # Use unstructured to get document metadata
-        elements = partition_pdf(
-            filename=str(pdf_path),
-            strategy="fast",  # Use fast strategy for metadata extraction
-            include_page_breaks=False,
-            max_partition=1,  # Only need first page for metadata
-        )
-
-        metadata = {
-            "total_elements": len(elements),
-            "file_path": str(pdf_path),
-            "file_name": pdf_path.name,
-            "file_size_bytes": pdf_path.stat().st_size,
-        }
-
-        # Extract metadata from elements
-        if elements:
-            first_element = elements[0]
-            if hasattr(first_element, "metadata"):
-                element_metadata = first_element.metadata
-                if hasattr(element_metadata, "filename"):
-                    metadata["filename"] = element_metadata.filename
-                if hasattr(element_metadata, "page_number"):
-                    metadata["first_page"] = element_metadata.page_number
-            else:
-                logger.warning(
-                    f"No element metadata found in unstructured extraction for PDF: {pdf_path}"
-                )
-        else:
-            logger.warning(
-                f"No elements extracted from PDF using unstructured: {pdf_path}"
-            )
-
-        return {"success": True, "metadata": metadata, "file_path": str(pdf_path)}
-
-    except Exception as e:
-        logger.error(
-            f"Error extracting metadata with unstructured from {pdf_path}: {str(e)}",
-            exc_info=True,
-        )
-        return {
-            "success": False,
-            "error": str(e),
-            "file_path": str(pdf_path),
-            "metadata": {},
-        }
-
-
-def compare_pdf_metadata_methods(pdf_path: Path) -> Dict[str, Any]:
-    """
-    Compare metadata extraction methods for a PDF.
-
-    Args:
-        pdf_path: Path to the PDF file
-
-    Returns:
-        Dictionary with comparison results
-    """
-    results = {
-        "file_path": str(pdf_path),
-        "pypdf_metadata": extract_pdf_metadata(pdf_path),
-        "unstructured_metadata": extract_pdf_metadata_with_unstructured(pdf_path),
-    }
-
-    # Add comparison summary
-    pypdf_success = results["pypdf_metadata"]["success"]
-    unstructured_success = results["unstructured_metadata"]["success"]
-
-    results["summary"] = {
-        "pypdf_success": pypdf_success,
-        "unstructured_success": unstructured_success,
-        "both_successful": pypdf_success and unstructured_success,
-        "metadata_fields_pypdf": (
-            len(results["pypdf_metadata"].get("metadata", {})) if pypdf_success else 0
-        ),
-        "metadata_fields_unstructured": (
-            len(results["unstructured_metadata"].get("metadata", {}))
-            if unstructured_success
-            else 0
-        ),
-    }
-
-    # Warn if neither method was successful
-    if not pypdf_success and not unstructured_success:
-        logger.warning(f"Both metadata extraction methods failed for PDF: {pdf_path}")
-    elif not pypdf_success:
-        logger.warning(f"PyPDF metadata extraction failed for PDF: {pdf_path}")
-    elif not unstructured_success:
-        logger.warning(f"Unstructured metadata extraction failed for PDF: {pdf_path}")
-
-    # Warn if metadata fields are significantly different between methods
-    pypdf_fields = results["summary"]["metadata_fields_pypdf"]
-    unstructured_fields = results["summary"]["metadata_fields_unstructured"]
-
-    if pypdf_success and unstructured_success:
-        if abs(pypdf_fields - unstructured_fields) > 5:  # Significant difference
-            logger.warning(
-                f"Large difference in metadata fields between methods for PDF: {pdf_path} "
-                f"(PyPDF: {pypdf_fields}, Unstructured: {unstructured_fields})"
-            )
-
-    return results
-
-
-def create_supreme_court_case_from_pdf(
-    extraction_result: ExtractionResult,
-    pdf_metadata: Dict[str, Any],
-    **case_kwargs,
-) -> SupremeCourtCase:
-    """
-    Create a SupremeCourtCase instance from PDF processing results.
-
-    Args:
-        extraction_result: Result from extract_text_from_pdf()
-        pdf_metadata: Result from extract_pdf_metadata()
-        **case_kwargs: Additional case information
-
-    Returns:
-        SupremeCourtCase instance with all metadata populated
-    """
-    # Create PDF metadata object
-    pdf_meta = PDFDocumentMetadata(
-        title=pdf_metadata.get("metadata", {}).get("Title"),
-        creator=pdf_metadata.get("metadata", {}).get("Creator"),
-        producer=pdf_metadata.get("metadata", {}).get("Producer"),
-        creation_date=pdf_metadata.get("metadata", {}).get("CreationDate"),
-        mod_date=pdf_metadata.get("metadata", {}).get("ModDate"),
-        total_pages=pdf_metadata.get("metadata", {}).get("total_pages", 0),
-        file_size_bytes=pdf_metadata.get("metadata", {}).get("file_size_bytes", 0),
-        file_path=pdf_metadata.get("metadata", {}).get("file_path", ""),
-        file_name=pdf_metadata.get("metadata", {}).get("file_name", ""),
-        creation_date_parsed=pdf_metadata.get("metadata", {}).get(
-            "creation_date_parsed"
-        ),
-        modification_date_parsed=pdf_metadata.get("metadata", {}).get(
-            "modification_date_parsed"
-        ),
-        is_encrypted=pdf_metadata.get("metadata", {}).get("is_encrypted", False),
-        pdf_version=pdf_metadata.get("metadata", {}).get("pdf_version", ""),
-    )
-
-    # Create extraction metadata object
-    extraction_meta = ExtractionMetadata(
-        extraction_method=extraction_result.method,
-        pages_processed=extraction_result.pages_processed,
-        total_elements=len(extraction_result.elements),
-        extraction_date=datetime.now().isoformat() + "Z",
-        preserve_hierarchy=extraction_result.metadata.get("preserve_hierarchy", True),
-        strategy=extraction_result.metadata.get("strategy", "hi_res"),
-    )
-
-    # Extract docket number and case year
-    docket_number = None
-    case_year = None
-
-    if pdf_meta.title:
-        # Try to extract from title like "24A1007 A. A. R. P. v. Trump (05/16/2025)"
-        title_parts = pdf_meta.title.split(" ")
-        if title_parts and len(title_parts[0]) >= 7:  # Likely a docket number
-            docket_number = title_parts[0]
-    elif pdf_meta.file_name:
-        # Try to extract from filename like "24A1007_AARPvTrump_20250516.pdf"
-        filename_parts = pdf_meta.file_name.split("_")
-        if filename_parts:
-            docket_number = filename_parts[0]
-
-    # Extract year from filename or creation date
-    if pdf_meta.file_name and "2025" in pdf_meta.file_name:
-        case_year = 2025
-    elif pdf_meta.creation_date_parsed:
-        try:
-            case_year = datetime.fromisoformat(
-                pdf_meta.creation_date_parsed.replace("Z", "+00:00")
-            ).year
-        except:
-            pass
-
-    # Create case metadata object
-    case_meta = CaseDocumentMetadata(
-        docket_number=docket_number,
-        case_type=case_kwargs.get("case_type"),
-        jurisdiction="supreme_court",
-        term=f"{case_year-1}-{case_year}" if case_year else None,
-        case_year=case_year,
-    )
-
-    # Create the SupremeCourtCase instance
-    return SupremeCourtCase(
-        pdf_metadata=pdf_meta,
-        extraction_metadata=extraction_meta,
-        case_metadata=case_meta,
-        **case_kwargs,
-    )

@@ -1,10 +1,12 @@
 """
-test_folio.py - Unit tests for FOLIO functionality
+test_folio.py - Unit tests for FOLIO functionality and RAG response validation
 """
 
 import pytest
 from folio import FOLIO
 from typing import List, Tuple, Dict
+from src.rag.models import RAGResponse, OntologicalConcept, validate_rag_response
+from src.rag.main import main
 
 
 @pytest.fixture

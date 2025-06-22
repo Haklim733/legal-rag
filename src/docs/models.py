@@ -2,9 +2,50 @@
 Data models for the knowledge graph.
 """
 
-from datetime import date, datetime
+from dataclasses import dataclass
+from datetime import datetime
+from enum import Enum
 from typing import List, Optional, Dict, Any
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, field_validator
+
+
+class ExtractionMethod(Enum):
+    """Available PDF text extraction methods."""
+
+    UNSTRUCTURED = "unstructured"
+    PYPDF = "pypdf"
+
+
+class UnstructuredStrategy(Enum):
+    """Available PDF text extraction methods."""
+
+    FAST = "fast"
+    HI_RES = "hi_res"
+    OCR_ONLY = "ocr_only"
+
+
+@dataclass
+class ExtractionResult:
+    """Result of PDF text extraction."""
+
+    full_text: str
+    elements: List[Dict[str, Any]]
+    metadata: Dict[str, Any]
+    success: bool
+    method: str
+    pages_processed: int
+    error_message: Optional[str] = None
+
+
+@dataclass
+class PDFExtractionResult:
+    """Result of PDF extraction (text + metadata)."""
+
+    text_result: ExtractionResult
+    metadata_result: Dict[str, Any]
+    success: bool
+    method: str
+    error_message: Optional[str] = None
 
 
 class PDFDocumentMetadata(BaseModel):
@@ -33,13 +74,15 @@ class PDFDocumentMetadata(BaseModel):
     is_encrypted: bool = Field(..., description="Whether the PDF is encrypted")
     pdf_version: str = Field(..., description="PDF version string")
 
-    @validator("total_pages")
+    @field_validator("total_pages")
+    @classmethod
     def validate_total_pages(cls, v):
         if v <= 0:
             raise ValueError("total_pages must be greater than 0")
         return v
 
-    @validator("file_size_bytes")
+    @field_validator("file_size_bytes")
+    @classmethod
     def validate_file_size(cls, v):
         if v < 0:
             raise ValueError("file_size_bytes must be non-negative")
@@ -233,3 +276,96 @@ class SupremeCourtCase(BaseModel):
         )
 
         return cls(pdf_metadata=pdf_meta, case_metadata=case_meta, **kwargs)
+
+    @staticmethod
+    def create_supreme_court_case_from_pdf(
+        extraction_result: ExtractionResult,
+        pdf_metadata: Dict[str, Any],
+        **case_kwargs,
+    ) -> "SupremeCourtCase":
+        """
+        Create a SupremeCourtCase instance from PDF processing results.
+
+        Args:
+            extraction_result: Result from extract_text_from_pdf()
+            pdf_metadata: Result from extract_pdf_metadata()
+            **case_kwargs: Additional case information
+
+        Returns:
+            SupremeCourtCase instance with all metadata populated
+        """
+        # Create PDF metadata object
+        pdf_meta = PDFDocumentMetadata(
+            title=pdf_metadata.get("metadata", {}).get("Title"),
+            creator=pdf_metadata.get("metadata", {}).get("Creator"),
+            producer=pdf_metadata.get("metadata", {}).get("Producer"),
+            creation_date=pdf_metadata.get("metadata", {}).get("CreationDate"),
+            mod_date=pdf_metadata.get("metadata", {}).get("ModDate"),
+            total_pages=pdf_metadata.get("metadata", {}).get("total_pages", 0),
+            file_size_bytes=pdf_metadata.get("metadata", {}).get("file_size_bytes", 0),
+            file_path=pdf_metadata.get("metadata", {}).get("file_path", ""),
+            file_name=pdf_metadata.get("metadata", {}).get("file_name", ""),
+            creation_date_parsed=pdf_metadata.get("metadata", {}).get(
+                "creation_date_parsed"
+            ),
+            modification_date_parsed=pdf_metadata.get("metadata", {}).get(
+                "modification_date_parsed"
+            ),
+            is_encrypted=pdf_metadata.get("metadata", {}).get("is_encrypted", False),
+            pdf_version=pdf_metadata.get("metadata", {}).get("pdf_version", ""),
+        )
+
+        # Create extraction metadata object
+        extraction_meta = ExtractionMetadata(
+            extraction_method=extraction_result.method,
+            pages_processed=extraction_result.pages_processed,
+            total_elements=len(extraction_result.elements),
+            extraction_date=datetime.now().isoformat() + "Z",
+            preserve_hierarchy=extraction_result.metadata.get(
+                "preserve_hierarchy", True
+            ),
+            strategy=extraction_result.metadata.get("strategy", "hi_res"),
+        )
+
+        # Extract docket number and case year
+        docket_number = None
+        case_year = None
+
+        if pdf_meta.title:
+            # Try to extract from title like "24A1007 A. A. R. P. v. Trump (05/16/2025)"
+            title_parts = pdf_meta.title.split(" ")
+            if title_parts and len(title_parts[0]) >= 7:  # Likely a docket number
+                docket_number = title_parts[0]
+        elif pdf_meta.file_name:
+            # Try to extract from filename like "24A1007_AARPvTrump_20250516.pdf"
+            filename_parts = pdf_meta.file_name.split("_")
+            if filename_parts:
+                docket_number = filename_parts[0]
+
+        # Extract year from filename or creation date
+        if pdf_meta.file_name and "2025" in pdf_meta.file_name:
+            case_year = 2025
+        elif pdf_meta.creation_date_parsed:
+            try:
+                case_year = datetime.fromisoformat(
+                    pdf_meta.creation_date_parsed.replace("Z", "+00:00")
+                ).year
+            except:
+                pass
+
+        # Create case metadata object
+        case_meta = CaseDocumentMetadata(
+            docket_number=docket_number,
+            case_type=case_kwargs.get("case_type"),
+            jurisdiction="supreme_court",
+            term=f"{case_year-1}-{case_year}" if case_year else None,
+            case_year=case_year,
+        )
+
+        # Create the SupremeCourtCase instance
+        return SupremeCourtCase(
+            pdf_metadata=pdf_meta,
+            extraction_metadata=extraction_meta,
+            case_metadata=case_meta,
+            **case_kwargs,
+        )
