@@ -17,7 +17,7 @@ This is sample repo to extract text from legal pdfs like the supreme court cases
 ./scripts/run.sh
 ```
 
-### Prerequisites
+## Prerequisites
 
 - ollama on localhost machine
 - NVIDIA GPU (optional, for GPU acceleration)
@@ -28,6 +28,7 @@ This is sample repo to extract text from legal pdfs like the supreme court cases
 - **Embedding Model**: `all-minilm` for vector embeddings
 - **Host**: `http://localhost:11434` (local ollama service)
 
+## ollama models need to be installed
 ```bash
 # Pull the LLM model
 ollama pull llama3.1:8b
@@ -36,9 +37,9 @@ ollama pull llama3.1:8b
 ollama pull all-minilm
 ```
 
-## Usage
+## usage
 ```bash
-uv run -m src.rag.main
+chmod +x scripts/run.sh && ./scripts/run.sh
 ```
 
 ## Details

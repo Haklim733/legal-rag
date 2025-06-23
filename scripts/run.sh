@@ -20,6 +20,9 @@ else
     echo "$PDF_FILENAME already exists. Skipping download."
 fi
 
+# copy the .env.example to .env
+cp .env.example .env
+
 docker compose up -d
 
 # Wait for Neo4j to be ready
@@ -46,4 +49,4 @@ echo "✅ Neo4j is healthy and ready."
 
 # Run the RAG main script
 echo "Running RAG on $PDF_PATH..."
-uv run python -m src.rag.main --file-path "$PDF_PATH"
+uv run -m src.rag.main --file-path "$PDF_PATH"
