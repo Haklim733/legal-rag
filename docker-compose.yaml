@@ -88,10 +88,10 @@ networks:
 
 # Volumes for persistent data
 volumes:
-  lightrag_data:
-    driver: local
-  ollama_data:
-    driver: local
+  # lightrag_data:
+  #   driver: local
+  # ollama_data:
+  #   driver: local
   neo4j_data:
     driver: local
   neo4j_logs:

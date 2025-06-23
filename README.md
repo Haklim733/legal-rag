@@ -3,7 +3,7 @@
 This is sample repo to extract text from pdfs and extract ontological concepts using FOLIO ontology and LightRAG. This is a proof of concept that stores FOLIO ontology in a knowledge graph and use LightRAG to query the document store.
 
 # Execution  
-1. download case from scotus website
+1. download case from scotus website (default is DONALD J. TRUMP, PRESIDENT OF THE UNITED STATES, ET AL. v. GWYNNE A. WILCOX, ET AL. )
 2. extract text from pdf
 3. ask llm to extract ontological concepts using knowledge graph 
 4. validate the response structure as JSON format
@@ -18,6 +18,7 @@ This is sample repo to extract text from pdfs and extract ontological concepts u
 
 - ollama on localhost machine
 - NVIDIA GPU (optional, for GPU acceleration)
+- docker compose (Neo4J needs to be running)
 - uv python package manager
 
 - **LLM Model**: `phi3:mini` for text generation
@@ -55,11 +56,10 @@ the models.py contains the pydantic models for validating the response from the 
 ## TODO
 1. validate Entity and Relationships in the response
 2. examine folio:operators
-3. de-dup
-4. vet the ontology
+4. vet the ontology (i.e. de-dup, vet inherited properties, etc)
 5. checkout Langchain LLM Transformers
-6. store in pgsql vector db 
-7. use llm api key
+6. use llm api key
+7. embed chunks into vector db
 
 ## Docker Setup with Ollama Models
 Coming soon

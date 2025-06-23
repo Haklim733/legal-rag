@@ -145,19 +145,19 @@ def get_labels(owl_class: OWLClass) -> str:
 def get_definition(owl_class: OWLClass) -> str:
     full_definition = ""
     if hasattr(owl_class, "definition"):
-        full_definition += f"\n{owl_class.definition}"
+        full_definition += f" {owl_class.definition}"
     if hasattr(owl_class, "description"):
-        full_definition += f"\n{owl_class.description}"
+        full_definition += f" {owl_class.description}"
     if hasattr(owl_class, "comment"):
-        full_definition += f"\n{owl_class.comment}"
+        full_definition += f" {owl_class.comment}"
     if hasattr(owl_class, "notes"):
-        full_definition += f"\n{owl_class.notes}"
+        full_definition += f" {owl_class.notes}"
     if hasattr(owl_class, "examples"):
         full_definition += (
-            f"\n(Examples): {'; '.join([ x for x in owl_class.examples if x])}"
+            f" (Examples): {'; '.join([ x for x in owl_class.examples if x])}"
         )
     labels = get_labels(owl_class)
-    full_definition += f"\nLabels: {labels}"
+    full_definition += f" Labels: {labels}"
     return full_definition
 
 
@@ -364,7 +364,7 @@ def create_entities(
         chunks = chunks + heirarchical_chunks
 
     logger.info(
-        f"Successfully created {len(chunks)} chunks and {len(entities_dict)} entities, and {len(relationships)} hierarchy relationships"
+        f"Successfully created {len(chunks)} chunks and {entities_dict.__len__()} entities, and {relationships.__len__()} hierarchy relationships"
     )
     return chunks, entities_dict, relationships
 

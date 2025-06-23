@@ -56,8 +56,12 @@ if not os.path.exists(WORKING_DIR):
 
 
 def clear_cache(working_dir: Path = WORKING_DIR):
-    if (working_dir / "kv_store_llm_response_cache.json").exists():
-        os.remove(working_dir / "kv_store_llm_response_cache.json")
+    for f in [
+        "kv_store_llm_response_cache.json",
+        "graph_chunk_entity_relation.graphml",
+    ]:
+        if (working_dir / f).exists():
+            os.remove(working_dir / f)
 
 
 async def initialize_rag():
@@ -73,6 +77,7 @@ async def initialize_rag():
                 "num_ctx": 4096,
                 "temperature": 0.7,  # Add some randomness
                 "seed": int(time.time()) % 1000000,  # Random seed to avoid caching
+                "num_predict": 4096,  # Allow for a much longer response
             },
         },
         embedding_func=EmbeddingFunc(
@@ -108,18 +113,14 @@ def main(query_text: str, entities: list[str]) -> RAGResponse:
     custom_kg = create_custom_kg(
         folio_instance,
         entities=entities,
-        subclasses=True,  # Include all subclasses
-    )
-    print(custom_kg)
+        subclasses=True,
+    ).to_dict()
 
     logger.info("Inserting filtered custom knowledge graph into LightRAG...")
     rag.insert_custom_kg(custom_kg)
     logger.info("Successfully inserted filtered custom knowledge graph")
 
     query_param = QueryParam()
-    logger.info(f"QueryParam instance: {query_param}")
-
-    # Execute query with a more specific legal question
     logger.info("Calling rag.query...")
     logger.info(f"Query text: {query_text}")
 
@@ -131,6 +132,7 @@ def main(query_text: str, entities: list[str]) -> RAGResponse:
     try:
         validated_response = validate_rag_response(response, query_text)
         logger.info("✅ Response validation successful!")
+        print(validated_response)
         logger.info(f"📊 Validation Summary:")
         logger.info(
             f"   - Total concepts found: {len(validated_response.entities) + len(validated_response.relationships)}"

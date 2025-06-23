@@ -428,24 +428,51 @@ def validate_rag_response(
 
     # Parse relationships
     if "relationships" in response_data:
+        entity_names = {entity.entity_name for entity in entities}
+
+        def find_entities_in_string(id_string, names):
+            """Finds entity names within a string. Prioritizes exact match."""
+            if id_string in names:
+                return [id_string]
+            found = [name for name in names if name in id_string]
+            return found
+
         for rel_data in response_data["relationships"]:
             try:
+                src_id_raw = rel_data.get("src_id", "")
+                tgt_id_raw = rel_data.get("tgt_id", "")
+
+                src_ids = find_entities_in_string(src_id_raw, entity_names)
+                tgt_ids = find_entities_in_string(tgt_id_raw, entity_names)
+
+                if not src_ids or not tgt_ids:
+                    logger.warning(
+                        f"Skipping relationship with ambiguous or missing src/tgt: '{src_id_raw}' -> '{tgt_id_raw}'"
+                    )
+                    continue
+
                 # Validate keywords against knowledge graph
                 keywords = rel_data.get("keywords", "")
-                if not validate_keywords_against_kg(keywords):
-                    logger.warning(
-                        f"Invalid keywords found: {keywords}. Valid keywords: {get_valid_keywords_from_kg()}"
-                    )
+                # Handle cases where keywords are returned as a list
+                if isinstance(keywords, list):
+                    keywords = ", ".join(keywords)
 
-                relationship = Relationship(
-                    src_id=rel_data.get("src_id", ""),
-                    tgt_id=rel_data.get("tgt_id", ""),
-                    description=rel_data.get("description", ""),
-                    keywords=rel_data.get("keywords", ""),
-                    weight=rel_data.get("weight", 0.5),
-                    source_id=rel_data.get("source_id", ""),
-                )
-                relationships.append(relationship)
+                # if not validate_keywords_against_kg(keywords):
+                #     logger.warning(
+                #         f"Invalid keywords found: {keywords}. Valid keywords: {get_valid_keywords_from_kg()}"
+                #     )
+
+                for src_id in src_ids:
+                    for tgt_id in tgt_ids:
+                        relationship = Relationship(
+                            src_id=src_id,
+                            tgt_id=tgt_id,
+                            description=rel_data.get("description", ""),
+                            keywords=keywords,
+                            weight=rel_data.get("weight", 0.5),
+                            source_id=rel_data.get("source_id", ""),
+                        )
+                        relationships.append(relationship)
             except Exception as e:
                 logger.warning(
                     f"Failed to create relationship from data {rel_data}: {e}"
