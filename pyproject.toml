@@ -100,7 +100,7 @@ pythonpath = ["src", ".", "tests"]
 addopts = "--ignore=packages/postgres --ignore=packages/functions"
 markers = ["incremental: mark a test as incremental."]
 log_cli = true
-log_cli_level = "INFO"
+log_cli_level = "ERROR"
 log_cli_format = "%(asctime)s [%(levelname)s] %(message)s (%(filename)s:%(lineno)s)"
 log_cli_date_format = "%Y-%m-%d"
 log_date_format = "%Y-%m-%d %H:%M:%S"

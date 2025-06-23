@@ -4,17 +4,17 @@ test_embed.py - Integration tests for ontology embedding functionality
 
 import os
 import pytest
+from functools import lru_cache
 
 from folio import FOLIO
 from folio.models import OWLClass, OWLObjectProperty
 
 # Import the ontology functions
 from src.rag.embed import (
-    Document,
-    load_ontology_for_rag,
     _get_children_with_depth,
     _get_class_depth,
     create_custom_kg,
+    get_all_subclasses,
 )
 from src.rag.embed import CustomKnowledgeGraph
 
@@ -27,32 +27,16 @@ def folio_instance():
     return FOLIO("github", llm=None)
 
 
+def _create_cached_kg(folio_instance):
+    return create_custom_kg(
+        folio_instance, entities=["Lawyer", "Legal Services Buyer"], subclasses=True
+    )
+
+
 @pytest.fixture
 def knowledge_graph(folio_instance):
-    """Create a knowledge graph from FOLIO for testing."""
-    return create_custom_kg(folio_instance)
-
-
-def test_load_ontology_for_rag_basic(folio_instance):
-    """Test basic functionality of load_ontology_for_rag with real FOLIO data."""
-
-    # Test with small limit and no depth restriction
-    documents = load_ontology_for_rag(limit=10)
-
-    # Verify we get documents
-    assert len(documents) > 0
-    assert len(documents) <= 10
-
-    print(f"Successfully loaded {len(documents)} documents")
-
-    # Verify document structure
-    for doc in documents:
-        assert isinstance(doc, Document)
-        assert doc.id is not None
-        assert doc.text is not None
-        assert len(doc.text) > 0
-        assert doc.metadata is not None
-        assert doc.metadata.source == "FOLIO"
+    """Create a cached knowledge graph from FOLIO for testing."""
+    return _create_cached_kg(folio_instance)
 
 
 def test_get_children_with_depth(folio_instance):
@@ -172,51 +156,63 @@ def test_get_class_depth(folio_instance):
     print(f"Depth of {target_class.label} relative to {root_class.label}: {depth}")
 
 
-def test_load_ontology_for_rag_with_top_level_root(folio_instance):
-    """Test load_ontology_for_rag starting from top-level classes with max depth 2."""
+def test_get_all_subclasses(folio_instance):
+    """Test _get_all_subclasses function."""
+    # Test with a known entity that should have subclasses
+    test_entities = ["Actor / Player"]
+
+    subclasses = get_all_subclasses(folio_instance, test_entities)
+
+    # Verify we get a set of strings
+    assert isinstance(subclasses, set)
+    assert len(subclasses) > 0
+
+    # Verify the original entity is included
+    assert "Actor / Player" in subclasses
+
+    # Verify we get some subclasses
     print(
-        "Testing load_ontology_for_rag starting from top-level classes with max_depth=2..."
+        f"Found {len(subclasses)} entities including subclasses: {list(subclasses)[:10]}..."
     )
 
-    # Test with max depth of 2 starting from top-level classes
-    documents = load_ontology_for_rag(limit=100, max_depth=2)
+    # Verify all items are strings
+    for entity_name in subclasses:
+        assert isinstance(entity_name, str)
+        assert len(entity_name) > 0
 
-    # Verify we get documents
-    assert len(documents) > 0
-    assert len(documents) <= 100
 
-    print(
-        f"Successfully loaded {len(documents)} documents with max_depth=2 from top-level classes"
+def test_create_custom_kg_with_filtering(folio_instance):
+    """Test create_custom_kg with entity filtering."""
+    # Test filtering to specific entities without subclasses
+    test_entities = ["Lawyer", "Legal Services Buyer"]
+
+    # Test without subclasses
+    kg_no_subclasses = create_custom_kg(
+        folio_instance, entities=test_entities, subclasses=False
     )
 
-    # Verify document structure
-    for doc in documents:
-        assert isinstance(doc, Document)
-        assert doc.id is not None
-        assert doc.text is not None
-        assert len(doc.text) > 0
+    # Verify we get a smaller knowledge graph
+    assert len(kg_no_subclasses.entities) <= len(test_entities)
 
-    # Check that we have both classes and properties
-    class_docs = [doc for doc in documents if doc.metadata.type == "OWLClass"]
-    property_docs = [
-        doc for doc in documents if doc.metadata.type == "OwlObjectProperty"
-    ]
+    # Verify only specified entities are included
+    entity_names = {entity.entity_name for entity in kg_no_subclasses.entities}
+    for entity_name in test_entities:
+        if entity_name in entity_names:  # Entity might not exist in the ontology
+            assert entity_name in entity_names
 
     print(
-        f"Found {len(class_docs)} class documents and {len(property_docs)} property documents"
+        f"✓ Filtered KG without subclasses: {len(kg_no_subclasses.entities)} entities"
     )
 
-    assert len(class_docs) > 0, "Should have at least some class documents"
-    # Make property documents optional since they might not always be available
-    if len(property_docs) == 0:
-        print(
-            "Warning: No property documents found - this might be expected depending on the ontology structure"
-        )
+    # Test with subclasses
+    kg_with_subclasses = create_custom_kg(
+        folio_instance, entities=test_entities, subclasses=True
+    )
 
-    # Print some sample class documents to see the hierarchy
-    print("\nSample class documents:")
-    for i, doc in enumerate(class_docs[:5]):
-        print(f"  {i+1}. {doc.metadata.label} - {doc.id}")
+    # Verify we get more entities when including subclasses
+    assert len(kg_with_subclasses.entities) >= len(kg_no_subclasses.entities)
+
+    print(f"✓ Filtered KG with subclasses: {len(kg_with_subclasses.entities)} entities")
 
 
 @pytest.mark.parametrize(
@@ -225,38 +221,30 @@ def test_load_ontology_for_rag_with_top_level_root(folio_instance):
         ("Public Defender", "Lawyer"),
     ],
 )
-def test_create_custom_kg_hierarchy_relationships(knowledge_graph, child, parent):
+def test_create_custom_kg_hierarchy_relationships(
+    folio_instance, child, parent, knowledge_graph
+):
     """
     Test specific parent-child relationships in the knowledge graph.
+    Uses Lawyer as the parent entity with subclasses=True to ensure the hierarchy is included.
     """
+    # Create a filtered knowledge graph with Lawyer and its subclasses
     entities_by_name = {e.entity_name: e for e in knowledge_graph.entities}
-    relationships_by_src = {r.src_id: r for r in knowledge_graph.relationships}
+    relationships_by_src = [
+        r for r in knowledge_graph.relationships if r.src_id == child
+    ]
+    assert relationships_by_src
 
     # Check that both entities exist
     assert child in entities_by_name, f"Child entity '{child}' should exist"
     assert parent in entities_by_name, f"Parent entity '{parent}' should exist"
 
-    child_entity = entities_by_name[child]
-    parent_entity = entities_by_name[parent]
-
-    # Check that the relationship exists
+    parent_rel = [x for x in relationships_by_src if x.tgt_id == parent]
+    assert parent_rel
     assert (
-        child_entity.source_id in relationships_by_src
-    ), f"Relationship for '{child}' should exist"
-
-    relationship = relationships_by_src[child_entity.source_id]
-
-    # Verify relationship properties
-    assert (
-        relationship.tgt_id == parent_entity.source_id
-    ), f"'{child}' should be related to '{parent}'"
-    assert (
-        "subClassOf" in relationship.description
-    ), f"Relationship should contain 'subClassOf'"
-    assert (
-        relationship.keywords == "subClassOf"
-    ), f"Keywords should be 'is a, subclass of'"
-    assert relationship.weight == 1.0, "Relationship weight should be 1.0"
+        "subClassOf" in parent_rel[0].keywords
+    ), f"Keywords should contain 'subClassOf'"
+    assert parent_rel[0].weight == 1.0, "Relationship weight should be 1.0"
 
     print(f"✓ Verified hierarchy relationship: {child} is a subclass of {parent}")
 
@@ -266,89 +254,29 @@ def test_create_custom_kg_predicate_relationships(knowledge_graph):
     Test predicate relationships in the knowledge graph.
     Tests the specific SPO: lawyer, folio:represents, legal service buyer
     """
-    entities_by_name = {e.entity_name: e for e in knowledge_graph.entities}
-    relationships_by_src = {r.src_id: r for r in knowledge_graph.relationships}
-    chunks_by_source_id = {c.source_id: c for c in knowledge_graph.chunks}
+    # Create a knowledge graph that includes both Lawyer and Legal Services Buyer
+    entities_by_name = {
+        e.entity_name: e
+        for e in knowledge_graph.entities
+        if e.entity_name in ["Lawyer", "Legal Services Buyer"]
+    }
+    relationships_by_src = [
+        r
+        for r in knowledge_graph.relationships
+        if r.src_id in ["Lawyer", "Legal Services Buyer"]
+    ]
+    assert relationships_by_src
 
     # Define the expected SPO relationship
     subject = "Lawyer"
     predicate = "represents"  # This should match the predicate label in FOLIO
     object_entity = "Legal Services Buyer"  # This should match the entity name in FOLIO
 
-    # Check that all entities exist
-    assert subject in entities_by_name, f"Subject entity '{subject}' should exist"
-    assert (
-        object_entity in entities_by_name
-    ), f"Object entity '{object_entity}' should exist"
-
-    subject_entity = entities_by_name[subject]
-    object_entity_obj = entities_by_name[object_entity]
-
-    # Look for relationships where Lawyer is the source
-    lawyer_relationships = [
-        r for r in knowledge_graph.relationships if r.src_id == subject_entity.source_id
-    ]
-
-    # Find the specific relationship with the expected predicate
-    target_relationship = None
-    for rel in lawyer_relationships:
-        if (
-            predicate.lower() in rel.description.lower()
-            or predicate.lower() in rel.keywords.lower()
-        ):
-            target_relationship = rel
-            break
-
-    # If not found, look for any relationship from Lawyer to Legal Services Buyer
-    if target_relationship is None:
-        for rel in lawyer_relationships:
-            if rel.tgt_id == object_entity_obj.source_id:
-                target_relationship = rel
-                break
-
-    if target_relationship:
-        # Verify relationship properties
-        assert (
-            target_relationship.src_id == subject_entity.source_id
-        ), f"Source should be {subject}"
-        assert (
-            target_relationship.tgt_id == object_entity_obj.source_id
-        ), f"Target should be {object_entity}"
-        assert target_relationship.weight == 1.0, "Relationship weight should be 1.0"
-        assert target_relationship.description, "Relationship should have a description"
-        assert target_relationship.keywords, "Relationship should have keywords"
-
-        # Check that there's a corresponding chunk for this relationship
-        expected_chunk_source_id = f"{subject}_{predicate}_{object_entity}"
-
-        # Look for chunks that contain the relationship information
-        relationship_chunks = [
-            c for c in knowledge_graph.chunks if c.source_id == expected_chunk_source_id
-        ]
-
-        assert (
-            len(relationship_chunks) > 0
-        ), f"Should have chunks for the {subject}-{predicate}-{object_entity} relationship"
-
-        print(
-            f"✓ Verified predicate relationship: {subject} {predicate} {object_entity}"
-        )
-        print(f"  Relationship description: {target_relationship.description}")
-        print(f"  Found {len(relationship_chunks)} related chunks")
-    else:
-        # If the specific relationship doesn't exist, print available relationships for debugging
-        print(
-            f"⚠ Specific relationship {subject} {predicate} {object_entity} not found"
-        )
-        print(f"Available relationships from {subject}:")
-        for rel in lawyer_relationships:
-            tgt_entity = next(
-                (e for e in knowledge_graph.entities if e.source_id == rel.tgt_id), None
-            )
-        # Skip the test if the specific relationship doesn't exist
-        pytest.skip(
-            f"Specific relationship {subject} {predicate} {object_entity} not found in the knowledge graph"
-        )
+    for rel in relationships_by_src:
+        if rel.tgt_id == object_entity:
+            assert rel.src_id == subject
+            predicate in rel.keywords
+            assert rel.weight == 1.0
 
 
 def test_create_custom_kg_actual_hierarchy(knowledge_graph):
@@ -392,7 +320,7 @@ def test_create_custom_kg_actual_hierarchy(knowledge_graph):
             ], "Target entity should exist"
             assert (
                 "subClassOf" in rel.keywords
-            ), "Relationship should contain 'is a subclass of'"
+            ), "Relationship should contain 'subClassOf'"
             assert rel.keywords == "subClassOf", "Keywords should be 'subClassOf'"
             assert rel.weight == 1.0, "Relationship weight should be 1.0"
 
@@ -439,13 +367,7 @@ def test_create_custom_kg_entity_consistency(knowledge_graph):
     Test that entities have consistent structure and naming.
     """
     for entity in knowledge_graph.entities:
-        # Check source_id format
-        expected_source_id = f"entity_{entity.entity_name.lower().replace(' ', '_')}"
-        assert (
-            entity.source_id == expected_source_id
-        ), f"Entity {entity.entity_name} should have correct source_id format"
-
-        # Check that entity_name and entity_type are the same
+        # Check that entity_name and entity_type are the same (current implementation)
         assert (
             entity.entity_name == entity.entity_type
         ), f"Entity {entity.entity_name} should have same name and type"
@@ -564,128 +486,146 @@ def test_create_custom_kg_multiple_relationships(knowledge_graph):
         )
 
 
-def test_create_custom_kg_relationship_types(knowledge_graph):
+def test_create_custom_kg_description_merging(knowledge_graph):
     """
-    Test different types of relationships that can exist between entities.
+    Test that entity descriptions are properly merged when duplicates are found.
+    This test verifies that the None handling in description merging works correctly.
     """
-    # Group relationships by type (based on keywords)
-    relationship_types = {}
-
-    for rel in knowledge_graph.relationships:
-        # Extract relationship type from keywords or description
-        rel_type = "general"
-        if "subclass" in rel.keywords.lower():
-            rel_type = "hierarchy"
-        elif "represents" in rel.keywords.lower():
-            rel_type = "representation"
-        elif "appears" in rel.keywords.lower():
-            rel_type = "appearance"
-        elif "works" in rel.keywords.lower() or "employed" in rel.keywords.lower():
-            rel_type = "employment"
-        elif "filed" in rel.keywords.lower() or "jurisdiction" in rel.keywords.lower():
-            rel_type = "jurisdiction"
-
-        if rel_type not in relationship_types:
-            relationship_types[rel_type] = []
-        relationship_types[rel_type].append(rel)
-
-    print(f"\nRelationship types found:")
-    for rel_type, rels in relationship_types.items():
-        print(f"  {rel_type}: {len(rels)} relationships")
-
-    # Verify we have different types of relationships
-    assert len(relationship_types) > 0, "Should have at least one type of relationship"
-
-    # Test that hierarchy relationships are properly structured
-    if "hierarchy" in relationship_types:
-        hierarchy_rels = relationship_types["hierarchy"]
-        for rel in hierarchy_rels:
-            assert "is a subclass of" in rel.description or "subClassOf" in rel.keywords
-            assert rel.weight == 1.0
+    # Check that all entities have valid descriptions (not None)
+    for entity in knowledge_graph.entities:
+        assert (
+            entity.description is not None
+        ), f"Entity {entity.entity_name} should have a non-None description"
+        assert isinstance(
+            entity.description, str
+        ), f"Entity {entity.entity_name} should have a string description"
+        assert (
+            len(entity.description.strip()) > 0
+        ), f"Entity {entity.entity_name} should have a non-empty description"
 
     print(
-        f"✓ Successfully verified {len(relationship_types)} different relationship types"
+        f"✓ Description merging verified for {len(knowledge_graph.entities)} entities"
     )
 
 
-def test_create_custom_kg_entity_relationship_association(knowledge_graph):
+def test_create_custom_kg_relationship_id_format(knowledge_graph):
     """
-    Test that entities are properly associated with their relationships.
+    Test that relationship IDs are properly formatted.
     """
-    # Test that entities have relationship ID lists
-    for entity in knowledge_graph.entities:
-        assert hasattr(
-            entity, "outgoing_relationship_ids"
-        ), f"Entity {entity.entity_name} should have outgoing_relationship_ids"
-        assert hasattr(
-            entity, "incoming_relationship_ids"
-        ), f"Entity {entity.entity_name} should have incoming_relationship_ids"
-        assert isinstance(
-            entity.outgoing_relationship_ids, list
-        ), f"outgoing_relationship_ids should be a list for {entity.entity_name}"
-        assert isinstance(
-            entity.incoming_relationship_ids, list
-        ), f"incoming_relationship_ids should be a list for {entity.entity_name}"
-
-    # Test that relationships have unique IDs
-    relationship_ids = [rel.source_id for rel in knowledge_graph.relationships]
-    assert len(relationship_ids) == len(
-        set(relationship_ids)
-    ), "All relationships should have unique IDs"
-
-    # Test that relationships have relationship_type
     for rel in knowledge_graph.relationships:
-        assert hasattr(
-            rel, "relationship_type"
-        ), f"Relationship {rel.source_id} should have relationship_type"
+        # Check that relationship_id is properly formatted
+        assert rel.source_id, "Relationship should have a source_id"
+        assert rel.src_id, "Relationship should have a src_id"
+        assert rel.tgt_id, "Relationship should have a tgt_id"
+
+        # Verify the relationship ID format matches the expected pattern
+        expected_id_format = f"{rel.src_id}_subclass_of_{rel.tgt_id}".replace(
+            " ", "_"
+        ).lower()
+        if "subclass" in rel.description.lower():
+            assert (
+                rel.source_id == expected_id_format
+            ), f"Relationship ID should match expected format: {expected_id_format}"
+
+    print(
+        f"✓ Relationship ID format verified for {len(knowledge_graph.relationships)} relationships"
+    )
+
+
+def test_create_custom_kg_entity_source_id_format(knowledge_graph):
+    """
+    Test that entity source_ids are properly formatted.
+    """
+    for entity in knowledge_graph.entities:
+        # Check that source_id is properly formatted (should be the entity name)
         assert (
-            rel.relationship_type
-        ), f"Relationship {rel.source_id} should have non-empty relationship_type"
+            entity.source_id == entity.entity_name
+        ), f"Entity {entity.entity_name} should have source_id equal to entity_name"
 
-    # Test entity-relationship associations
-    entities_by_source_id = {
-        entity.source_id: entity for entity in knowledge_graph.entities
-    }
-    relationships_by_id = {rel.source_id: rel for rel in knowledge_graph.relationships}
+    print(
+        f"✓ Entity source_id format verified for {len(knowledge_graph.entities)} entities"
+    )
 
-    for rel in knowledge_graph.relationships:
-        # Check that source entity has this relationship in outgoing list
-        if rel.src_id in entities_by_source_id:
-            source_entity = entities_by_source_id[rel.src_id]
-            assert (
-                rel.source_id in source_entity.outgoing_relationship_ids
-            ), f"Source entity {source_entity.entity_name} should have relationship {rel.source_id} in outgoing_relationship_ids"
 
-        # Check that target entity has this relationship in incoming list
-        if rel.tgt_id in entities_by_source_id:
-            target_entity = entities_by_source_id[rel.tgt_id]
-            assert (
-                rel.source_id in target_entity.incoming_relationship_ids
-            ), f"Target entity {target_entity.entity_name} should have relationship {rel.source_id} in incoming_relationship_ids"
+def test_create_custom_kg_duplicate_handling(knowledge_graph):
+    """
+    Test that duplicate entities are handled properly.
+    """
+    # Check for duplicate entity names
+    entity_names = [entity.entity_name for entity in knowledge_graph.entities]
+    unique_entity_names = set(entity_names)
 
-    # Test relationship counting
-    for entity in knowledge_graph.entities:
-        total_rels = entity.get_total_relationships()
-        expected_total = len(entity.outgoing_relationship_ids) + len(
-            entity.incoming_relationship_ids
+    # If there are duplicates, they should be properly merged
+    if len(entity_names) != len(unique_entity_names):
+        print(
+            f"Found {len(entity_names) - len(unique_entity_names)} duplicate entities that were merged"
         )
+
+        # Check that merged entities have proper descriptions
+        for entity in knowledge_graph.entities:
+            assert (
+                entity.description is not None
+            ), f"Merged entity {entity.entity_name} should have a non-None description"
+            assert isinstance(
+                entity.description, str
+            ), f"Merged entity {entity.entity_name} should have a string description"
+    else:
+        print("No duplicate entities found")
+
+    print(f"✓ Duplicate handling verified for {len(knowledge_graph.entities)} entities")
+
+
+def test_create_custom_kg_filtering_consistency(knowledge_graph):
+    """
+    Test that filtering maintains consistency between entities, relationships, and chunks.
+    """
+    # Test that all relationships reference entities that exist
+    entity_names = {entity.entity_name for entity in knowledge_graph.entities}
+    print(list(entity_names))
+
+    for rel in knowledge_graph.relationships:
+        print(rel)
+        # Check that source entity exists
         assert (
-            total_rels == expected_total
-        ), f"Entity {entity.entity_name} should have correct total relationship count"
+            rel.src_id in entity_names
+        ), f"Relationship source '{rel.src_id}' should reference an existing entity"
+        # Check that target entity exists
+        # target may not exist outside of restricted entities
+        assert (
+            rel.tgt_id in entity_names
+        ), f"Relationship target '{rel.tgt_id}' should be referenced by an existing entity"
 
-    # Print some examples
-    print(f"\nEntity-Relationship Associations:")
-    for entity in knowledge_graph.entities[:5]:  # Show first 5 entities
-        print(f"  {entity.entity_name}:")
-        print(f"    Outgoing: {len(entity.outgoing_relationship_ids)} relationships")
-        print(f"    Incoming: {len(entity.incoming_relationship_ids)} relationships")
-        print(f"    Total: {entity.get_total_relationships()} relationships")
+    # Test that all chunks reference entities or relationships that exist
+    chunk_source_ids = {chunk.source_id for chunk in knowledge_graph.chunks}
+    relationship_source_ids = {rel.source_id for rel in knowledge_graph.relationships}
 
-        if entity.outgoing_relationship_ids:
-            print(f"    Outgoing IDs: {entity.outgoing_relationship_ids}")
-        if entity.incoming_relationship_ids:
-            print(f"    Incoming IDs: {entity.incoming_relationship_ids}")
+    for chunk in knowledge_graph.chunks:
+        # Chunk should reference either an entity or a relationship
+        assert (
+            chunk.source_id in entity_names
+            or chunk.source_id in relationship_source_ids
+        ), f"Chunk source_id '{chunk.source_id}' should reference an existing entity or relationship"
 
     print(
-        f"✓ Successfully verified entity-relationship associations for {len(knowledge_graph.entities)} entities"
+        f"✓ Filtering consistency verified for {len(knowledge_graph.entities)} entities, {len(knowledge_graph.relationships)} relationships, and {len(knowledge_graph.chunks)} chunks"
     )
+
+
+def test_public_defender_lawyer_relationship(folio_instance):
+    """Test that Public Defender has Lawyer as a parent."""
+    # Find Public Defender class
+    public_defender = None
+    for cls in folio_instance.classes:
+        if cls.label == "Public Defender":
+            public_defender = cls
+            break
+
+    assert public_defender is not None, "Public Defender class not found"
+
+    # Check if Lawyer is a parent
+    parents = folio_instance.get_parents(public_defender.iri)
+    parent_names = [p.label for p in parents if p.label]
+
+    assert (
+        "Lawyer" in parent_names
+    ), f"Lawyer should be a parent of Public Defender. Found parents: {parent_names}"

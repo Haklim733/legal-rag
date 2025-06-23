@@ -80,172 +80,12 @@ def wait_for_lightrag_service(base_api_url, timeout=180, health_endpoint="/healt
     return False
 
 
-# Helper function to create a Document from an OWLClass
-def _create_document_from_owl_class(owl_class: OWLClass) -> Document | None:
-    if not owl_class.iri:
-        print(f"Skipping class with no IRI: {owl_class.label}")
-        return None
-
-    doc_id = owl_class.iri
-    label = owl_class.preferred_label or owl_class.label or "Unnamed Class"
-    definition = (
-        owl_class.definition
-        or owl_class.description
-        or owl_class.comment
-        or "No definition available."
-    )
-
-    text_content_parts = [
-        f"Type: Ontology Class",
-        f"Label: {label}",
-        f"IRI: {doc_id}",
-        f"Definition: {definition}",
-    ]
-    if owl_class.alternative_labels:
-        # Filter out None values before joining
-        valid_alt_labels = [
-            label for label in owl_class.alternative_labels if label is not None
-        ]
-        if valid_alt_labels:
-            text_content_parts.append(
-                f"Alternate Labels: {', '.join(valid_alt_labels)}"
-            )
-    if owl_class.examples:
-        # Filter out None values before joining
-        valid_examples = [ex for ex in owl_class.examples if ex is not None]
-        if valid_examples:
-            text_content_parts.append(f"Examples: {'; '.join(valid_examples)}")
-    if owl_class.notes:
-        # Filter out None values before joining
-        valid_notes = [note for note in owl_class.notes if note is not None]
-        if valid_notes:
-            text_content_parts.append(f"Notes: {'; '.join(valid_notes)}")
-    if owl_class.sub_class_of:
-        # Filter out None values before joining
-        valid_sub_classes = [sub for sub in owl_class.sub_class_of if sub is not None]
-        if valid_sub_classes:
-            text_content_parts.append(f"Subclass Of: {', '.join(valid_sub_classes)}")
-
-    text_content = "\n".join(text_content_parts)
-
-    # Create metadata using Pydantic model
-    metadata = ClassMetadata(
-        uri=doc_id,
-        label=label,
-        alternative_labels=owl_class.alternative_labels,
-        sub_class_of=owl_class.sub_class_of,
-    )
-
-    return Document(id=doc_id, text=text_content, metadata=metadata)
-
-
-# Helper function to create a Document from an OWLObjectProperty
-def _create_document_from_owl_property(owl_prop: OWLObjectProperty) -> Document | None:
-    if not owl_prop.iri:
-        print(f"Skipping property with no IRI: {owl_prop.label}")
-        return None
-
-    doc_id = owl_prop.iri
-    label = owl_prop.preferred_label or owl_prop.label or "Unnamed Property"
-    definition = owl_prop.definition or "No definition available."
-
-    text_content_parts = [
-        f"Type: Ontology Property",
-        f"Label: {label}",
-        f"IRI: {doc_id}",
-        f"Definition: {definition}",
-    ]
-    if owl_prop.alternative_labels:
-        # Filter out None values before joining
-        valid_alt_labels = [
-            label for label in owl_prop.alternative_labels if label is not None
-        ]
-        if valid_alt_labels:
-            text_content_parts.append(
-                f"Alternate Labels: {', '.join(valid_alt_labels)}"
-            )
-    if owl_prop.domain:
-        # Filter out None values before joining
-        valid_domain = [domain for domain in owl_prop.domain if domain is not None]
-        if valid_domain:
-            text_content_parts.append(f"Domain: {', '.join(valid_domain)}")
-    if owl_prop.range:
-        # Filter out None values before joining
-        valid_range = [
-            range_val for range_val in owl_prop.range if range_val is not None
-        ]
-        if valid_range:
-            text_content_parts.append(f"Range: {', '.join(valid_range)}")
-    if owl_prop.examples:
-        # Filter out None values before joining
-        valid_examples = [ex for ex in owl_prop.examples if ex is not None]
-        if valid_examples:
-            text_content_parts.append(f"Examples: {'; '.join(valid_examples)}")
-    if owl_prop.definition:
-        # Filter out None values before joining
-        valid_definition = [
-            definition for definition in owl_prop.definition if definition is not None
-        ]
-        if valid_definition:
-            text_content_parts.append(f"Definition: {'; '.join(valid_definition)}")
-
-    text_content = "\n".join(text_content_parts)
-
-    # Create metadata using Pydantic model
-    metadata = PropertyMetadata(
-        uri=doc_id,
-        label=label,
-        alternative_labels=owl_prop.alternative_labels,
-        domain=owl_prop.domain,
-        range=owl_prop.range,
-    )
-
-    return Document(id=doc_id, text=text_content, metadata=metadata)
-
-
-def load_ontology_for_rag(limit: int = None, max_depth: int = 2):
-    """Loads ontology data, processes it into Document objects, and returns them."""
-    logger.info(f"Loading FOLIO ontology with limit={limit}, max_depth={max_depth}")
-    folio_instance = FOLIO()
-    documents = []
-
-    # Process classes
-    logger.info(f"Processing {len(folio_instance.classes)} classes...")
-    for owl_class in folio_instance.classes:
-        # Apply depth filtering if max_depth is set
-        # This simple check assumes root classes have no sub_class_of or specific roots are known.
-        # For more complex ontologies, a proper root finding or explicit root list might be needed.
-        # if max_depth is not None and _get_class_depth(folio_instance, owl_class, ???) > max_depth:
-        # continue
-        doc = _create_document_from_owl_class(owl_class)
-        if doc:
-            documents.append(doc)
-
-    # Process properties - use get_all_properties() instead of properties attribute
-    all_properties = folio_instance.get_all_properties()
-    logger.info(f"Processing {len(all_properties)} properties...")
-    for owl_prop in all_properties:
-        doc = _create_document_from_owl_property(owl_prop)
-        if doc:
-            documents.append(doc)
-
-    if limit:
-        logger.info(f"Limiting documents to {limit}")
-        documents = documents[:limit]
-
-    logger.info(f"Loaded {len(documents)} documents from FOLIO ontology.")
-    return documents
-
-
 def _get_children_with_depth(folio_instance, parent_class, max_depth, current_depth=1):
     """Get all children of a class up to a specified depth using manual traversal."""
     if current_depth >= max_depth:
         return []
 
     children = []
-    logger.info(
-        f"Looking for children of {parent_class.label} (IRI: {parent_class.iri}) at depth {current_depth}"
-    )
 
     # Use manual traversal since get_children might not be available or working
     for owl_class in folio_instance.classes:
@@ -288,19 +128,138 @@ def _get_class_depth(folio_instance, target_class, root_class, current_depth=0):
     return None
 
 
+def get_labels(owl_class: OWLClass) -> str:
+    labels = []
+    if owl_class.label:
+        labels.append(owl_class.label)
+    if owl_class.preferred_label:
+        labels.append(owl_class.preferred_label)
+    if owl_class.alternative_labels:
+        labels.extend(owl_class.alternative_labels)
+    return ", ".join(labels)
+
+
+def get_definition(owl_class: OWLClass) -> str:
+    full_definition = ""
+    if hasattr(owl_class, "definition"):
+        full_definition += f"\n{owl_class.definition}"
+    if hasattr(owl_class, "description"):
+        full_definition += f"\n{owl_class.description}"
+    if hasattr(owl_class, "comment"):
+        full_definition += f"\n{owl_class.comment}"
+    if hasattr(owl_class, "notes"):
+        full_definition += f"\n{owl_class.notes}"
+    if hasattr(owl_class, "examples"):
+        full_definition += (
+            f"\n(Examples): {'; '.join([ x for x in owl_class.examples if x])}"
+        )
+    labels = get_labels(owl_class)
+    full_definition += f"\nLabels: {labels}"
+    return full_definition
+
+
+def create_relationship(
+    folio_instance: FOLIO,
+    subject_iri: str,
+    object_iri: str,
+    predicate: str,
+    bypass_definition: bool = False,
+) -> Optional[Relationship]:
+    try:
+        subject_info = folio_instance[subject_iri]
+        object_info = folio_instance[object_iri]
+        subject_name = subject_info.label
+        object_name = object_info.label
+
+        if not subject_name or not object_name:
+            logger.warning(
+                f"Skipping relationship with no name: {subject_name} or {object_name}"
+            )
+            return None
+
+        if subject_info.deprecated or object_info.deprecated:
+            logger.warning(
+                f"Skipping deprecated subject or object: {subject_name} or {object_name}"
+            )
+            return None
+
+        definition = f"{subject_name} {predicate} {object_name}"
+        labels = predicate.split(":")[-1]
+
+        if not bypass_definition:
+            predicate_info = folio_instance.get_properties_by_label(predicate)[0]
+            definition = get_definition(predicate_info)
+            labels = get_labels(predicate_info)
+        else:
+            # For hierarchy relationships, create a more natural description
+            if predicate == "subclass_of":
+                definition = f"{subject_name} is a subclass of {object_name}"
+                labels = "subClassOf"
+
+        # Create relationship
+        src_id = subject_name
+        tgt_id = object_name
+
+        relationship_id = Relationship.create_relationship_id(src_id, predicate, tgt_id)
+
+        relationship = Relationship(
+            src_id=src_id,
+            tgt_id=tgt_id,
+            description=definition,
+            keywords=f"{predicate}, {subject_name}, {object_name}, {labels}",
+            weight=1.0,
+            source_id=relationship_id,
+        )
+    except Exception as e:
+        logger.error(
+            f"Failed to create relationship for {subject_name} {predicate} {object_name}: {e}"
+        )
+        raise
+    return relationship
+
+
+def create_hierarchy_relationships(
+    folio_instance: FOLIO,
+    class_iri: str,
+) -> dict[str, Relationship]:
+    """
+    Creates hierarchy relationships from FOLIO ontology classes.
+    """
+    relationships = {}
+    try:
+        parents = folio_instance.get_parents(class_iri)
+        if parents:
+            for parent_class in parents:
+                parent_iri = parent_class.iri
+                if parent_iri == class_iri:
+                    continue
+                relationship = create_relationship(
+                    folio_instance, class_iri, parent_iri, "subclass_of", True
+                )
+                if relationship:
+                    if relationship.source_id in relationships:
+                        logger.warning(
+                            f"Found duplicate relationship: {relationship.source_id}"
+                        )
+                        continue
+                    relationships[relationship.source_id] = relationship
+
+    except Exception as e:
+        logger.warning(f"Could not determine parents for {class_iri}: {e}")
+    return relationships
+
+
 def create_entities(
     folio_instance: FOLIO,
-) -> tuple[list[Chunk], list[Entity], dict[str, str], list[Relationship]]:
+    entities: list[str] = None,
+) -> dict[str, list[Chunk] | dict[str, Entity] | dict[str, Relationship]]:
     """
     Creates entities and chunks from FOLIO ontology classes.
     Returns chunks, entities, a mapping of IRI to source_id.
     """
     chunks = []
-    entities = []
-    added_entities = {}  # Maps IRI to source_id
-    hierarchy_relationships = (
-        []
-    )  # List of Relationship objects for subclass relationships
+    entities_dict = {}
+    relationships = {}
 
     logger.info(f"Processing {len(folio_instance.classes)} classes for entities...")
 
@@ -309,8 +268,12 @@ def create_entities(
             logger.warning(f"Skipping class with no IRI at index {i}")
             continue
 
-        # Skip deprecated classes
-        if hasattr(owl_class, "deprecated") and owl_class.deprecated:
+        # Skip deprecated classes - handle None label safely
+        if (
+            hasattr(owl_class, "deprecated")
+            and owl_class.deprecated
+            or (owl_class.label and "deprecated" in owl_class.label.lower())
+        ):
             logger.debug(
                 f"Skipping deprecated class: {owl_class.label or owl_class.iri}"
             )
@@ -318,237 +281,127 @@ def create_entities(
 
         # Validate required fields before creating entities
         class_name = owl_class.label
+        class_iri = owl_class.iri
         if not class_name:
             logger.warning(
-                f"Skipping class with no label and no valid IRI: {owl_class.iri}"
+                f"Skipping class with no label and no valid IRI: {class_iri}"
             )
             continue
 
-        class_iri = owl_class.iri
-
-        # Create chunk for the class - use the same definition logic for both entity and chunk
-        definition = (
-            owl_class.definition
-            or owl_class.description
-            or owl_class.comment
-            or "No definition available."
-        )
-
-        # Enhanced definition handling for reference-style definitions
-        if definition and definition.startswith("See industry description for"):
-            # For reference-style definitions, create a more comprehensive description
-            enhanced_definition = f"{class_name}: {definition}"
-        elif (
-            definition and len(definition.strip()) < 50 and "see" in definition.lower()
-        ):
-            # Handle other short reference-style definitions
-            enhanced_definition = f"{class_name}: {definition}"
+        # Only process if in target_entities
+        if entities is not None and class_name not in entities:
+            logger.debug(f"Skipping {class_name} - not in target entities")
+            continue
         else:
-            enhanced_definition = definition
+            if entities is not None:
+                logger.debug(f"Including {class_name} - found in target entities")
 
-        # Build comprehensive description including labels
-        description_parts = [enhanced_definition]
-
-        # Add preferred label if it exists and is different from the main label
-        if hasattr(owl_class, "preferred_label") and owl_class.preferred_label:
-            if owl_class.preferred_label != class_name:
-                description_parts.append(
-                    f"Preferred label: {owl_class.preferred_label}"
-                )
-
-        # Add alternative labels if they exist
-        if hasattr(owl_class, "alternative_labels") and owl_class.alternative_labels:
-            # Filter out None values and duplicates
-            valid_alt_labels = [
-                label
-                for label in owl_class.alternative_labels
-                if label and label != class_name
-            ]
-            if valid_alt_labels:
-                alt_labels_str = ", ".join(valid_alt_labels)
-                description_parts.append(f"Alternative labels: {alt_labels_str}")
-
-        full_description = ". ".join(description_parts)
-
-        # Create chunk content
-        chunk_text = full_description
-        if owl_class.examples:
-            # Filter out None values from examples
-            valid_examples = [ex for ex in owl_class.examples if ex is not None]
-            if valid_examples:
-                chunk_text += f"\n(Examples): {'; '.join(valid_examples)}"
-
-        # Add notes if definition is minimal and notes are available
-        if owl_class.notes and (
-            len(enhanced_definition.strip()) < 100
-            or "see" in enhanced_definition.lower()
-        ):
-            valid_notes = [note for note in owl_class.notes if note is not None]
-            if valid_notes:
-                chunk_text += f"\n(Notes): {'; '.join(valid_notes)}"
+        description = get_definition(owl_class)
 
         try:
             chunk = Chunk(
-                content=chunk_text,
+                content=description,
                 source_id=class_name,
                 chunk_order_index=0,
             )
             chunks.append(chunk)
         except Exception as e:
-            logger.warning(f"Failed to create chunk for {class_name}: {e}")
+            logger.error(f"Failed to create chunk for {class_name}: {e}")
             continue
 
         try:
             entity = Entity(
                 entity_name=class_name,
                 entity_type=class_name,
-                description=chunk_text,
+                description=description,
                 source_id=class_name,
                 chunk_ids=[class_name],
             )
-            entities.append(entity)
-            added_entities[class_iri] = class_name
+            if class_name in entities_dict:
+                logger.warning(f"found duplicate entity {class_name}")
+                exist_description = entities_dict[class_name].description
+                # Handle None values when merging descriptions
+                current_desc = entity.description or ""
+                exist_desc = exist_description or ""
+                entity.description = f"{current_desc}\n{exist_desc}".strip()
+            else:
+                entities_dict[class_name] = entity
         except Exception as e:
-            logger.warning(f"Failed to create entity for {class_name}: {e}")
+            logger.error(f"Failed to create entity for {class_name}: {e}")
             continue
 
-        # Build hierarchy relationships while iterating through entities
-        try:
-            parents = folio_instance.get_parents(owl_class.iri)
-            if parents:
-                for parent_class in parents:
-                    # Skip if parent is deprecated
-                    if hasattr(parent_class, "deprecated") and parent_class.deprecated:
-                        logger.debug(
-                            f"Skipping deprecated parent: {parent_class.label or parent_class.iri}"
-                        )
-                        continue
+        heirarchical_relationships = (
+            create_hierarchy_relationships(folio_instance, class_iri) or {}
+        )
 
-                    parent_iri = parent_class.iri
-                    parent_name = parent_class.label or parent_iri.split("/")[-1]
-
-                    if parent_iri and parent_iri != class_iri:  # Avoid self-references
-                        # Create the relationship object with unique ID
-                        relationship_id = Relationship.create_relationship_id(
-                            class_name,
-                            "subclass_of",
-                            parent_name,
-                        )
-
-                        relationship = Relationship(
-                            relationship_id=relationship_id,
-                            src_id=class_name,
-                            tgt_id=parent_name,
-                            description=f"{class_name} is a subclass of {parent_name}.",
-                            keywords="subClassOf",
-                            weight=1.0,
-                            source_id=relationship_id,
-                        )
-                        hierarchy_relationships.append(relationship)
-
-                        # Associate the relationship with the source entity
-                        entity.add_outgoing_relationship(relationship_id)
-
-                        logger.debug(
-                            f"Added hierarchy relationship: {class_name} -> {parent_name} (ID: {relationship_id})"
-                        )
-                        break  # Only create relationship to first valid parent
-        except Exception as e:
-            logger.warning(f"Could not determine parents for {class_name}: {e}")
+        relationships = relationships | heirarchical_relationships
 
     logger.info(
-        f"Successfully created {len(chunks)} chunks and {len(entities)} entities, and {len(hierarchy_relationships)} hierarchy relationships"
+        f"Successfully created {len(chunks)} chunks and {len(entities_dict)} entities, and {len(relationships)} hierarchy relationships"
     )
-    return chunks, entities, added_entities, hierarchy_relationships
+    return chunks, entities_dict, relationships
 
 
 def create_predicates(
-    folio_instance: FOLIO, added_entities: dict[str, str]
-) -> tuple[list[Relationship], list[Chunk]]:
+    folio_instance: FOLIO,
+    entities: list[str] = None,
+) -> tuple[dict[str, Relationship], list[Chunk]]:
     """
     Creates relationships and chunks from FOLIO triples.
-    Requires the added_entities mapping from create_entities.
+    Requires the relationships and chunks from create_entities.
     Returns relationships and chunks.
     """
-    relationships = []
+    relationships = {}
     chunks = []
 
     logger.info(
         f"Processing {len(folio_instance.triples)} triples for relationships and chunks..."
     )
 
-    for subject_iri, predicate_iri, object_iri in [
-        x
-        for x in folio_instance.triples
-        if (x[1].startswith("folio") or x[1].startswith("oasis"))
-        and x[1] not in ["folio:operators"]
-    ]:
+    for subject_iri, predicate, object_iri in folio_instance.triples:
+        if predicate == "folio:operators":
+            continue
+        if not predicate.startswith("folio") and not predicate.startswith("oasis"):
+            continue
+
         try:
             subject_info = folio_instance[subject_iri]
             object_info = folio_instance[object_iri]
-
-            # Skip if either entity is deprecated
-            if object_info.deprecated or subject_info.deprecated:
-                continue
-
             subject_name = subject_info.label
             object_name = object_info.label
 
-            predicate_label = None
-            predicate_definition = None
+            # Skip if we can't get valid names
+            if not subject_name or not object_name:
+                continue
 
-            try:
-                predicate_info = folio_instance.get_property_by_label(predicate_iri)
-                if predicate_info:
-                    predicate_label = (
-                        getattr(predicate_info, "label", None)
-                        or predicate_iri.split("/")[-1]
-                    )
-                    predicate_definition = (
-                        getattr(predicate_info, "definition", None)
-                        or getattr(predicate_info, "description", None)
-                        or getattr(predicate_info, "comment", None)
-                        or "No definition available"
-                    )
-            except Exception as e:
-                logger.debug(f"Could not get predicate info for {predicate_iri}: {e}")
-                predicate_label = predicate_iri.split("/")[-1]
-                predicate_definition = "No definition available"
+            # Filter by target entities if specified - BOTH subject and object must be in entities
+            if entities is not None:
+                if subject_name not in entities or object_name not in entities:
+                    continue
 
-            # Create relationship
-            src_id = subject_name
-            tgt_id = object_name
-
-            relationship_id = Relationship.create_relationship_id(
-                src_id, predicate_label, tgt_id
+            relationship = create_relationship(
+                folio_instance, subject_iri, object_iri, predicate
             )
-
-            relationship = Relationship(
-                src_id=src_id,
-                tgt_id=tgt_id,
-                description=predicate_definition,
-                keywords=f"{predicate_label},{subject_name}, {object_name}",
-                weight=1.0,
-                source_id=relationship_id,
-            )
-            relationships.append(relationship)
+            if relationship.source_id in relationships:
+                logger.warning(f"found duplicate relationship {relationship.source_id}")
+                continue
+            relationships[relationship.source_id] = relationship
 
             # Create chunk content
-            chunk_text = predicate_definition
             try:
                 chunk = Chunk(
-                    content=chunk_text,
-                    source_id=relationship_id,
+                    content=relationship.description,
+                    source_id=relationship.source_id,
                     chunk_order_index=0,
                 )
                 chunks.append(chunk)
             except Exception as e:
-                logger.warning(f"Failed to create chunk for {predicate_label}: {e}")
+                logger.warning(f"Failed to create chunk for {predicate}: {e}")
                 continue
 
         except Exception as e:
             logger.warning(
-                f"Failed to create relationship for triple {subject_iri} {predicate_iri} {object_iri}: {e}"
+                f"Failed to create relationship for triple {subject_iri} {predicate} {object_iri}: {e}"
             )
             continue
 
@@ -650,32 +503,112 @@ def get_entity_relationship_summary(
     }
 
 
-def create_custom_kg(folio_instance: FOLIO) -> CustomKnowledgeGraph:
+def get_all_subclasses(folio_instance: FOLIO, entity_names: list[str]) -> set[str]:
+    """
+    Get all subclasses of the specified entities using FOLIO's built-in methods.
+    Also includes parents of subclasses to ensure all hierarchy relationships are valid.
+
+    Args:
+        folio_instance: The FOLIO instance
+        entity_names: List of entity names to find subclasses for
+
+    Returns:
+        Set of all subclass entity names (including the original entities and their parents)
+    """
+    all_entities = set()
+    for name in entity_names:
+        try:
+            # Try to find the entity by label
+            entities_found = folio_instance.get_by_label(name)
+            if not entities_found:
+                logger.warning(f"Entity '{name}' not found in FOLIO ontology")
+                continue
+
+            iri = entities_found[0].iri
+            logger.info(f"Found entity '{name}' with IRI: {iri}")
+
+            # Get children
+            children = folio_instance.get_children(iri)
+            logger.info(f"Found {len(children)} children for '{name}'")
+
+            all_entities.add(name)
+            child_labels = [x.label for x in children if x.label]
+            all_entities.update(child_labels)
+            logger.info(f"Added children for '{name}': {child_labels}")
+
+            # Also get parents of children to ensure all hierarchy relationships are valid
+            for child in children:
+                if child.label:
+                    try:
+                        parents = folio_instance.get_parents(child.iri)
+                        parent_labels = [p.label for p in parents if p.label]
+                        all_entities.update(parent_labels)
+                        logger.info(
+                            f"Added parents for child '{child.label}': {parent_labels}"
+                        )
+                    except Exception as e:
+                        logger.warning(
+                            f"Could not get parents for child '{child.label}': {e}"
+                        )
+
+        except Exception as e:
+            logger.error(f"Error getting subclasses for '{name}': {e}")
+            # Still add the original entity name even if we can't find subclasses
+            all_entities.add(name)
+
+    logger.info(f"Final set of entities: {all_entities}")
+    return all_entities
+
+
+def create_custom_kg(
+    folio_instance: FOLIO, entities: list[str] = None, subclasses: bool = True
+) -> CustomKnowledgeGraph:
     """
     Creates a custom knowledge graph from FOLIO ontology data.
     This function orchestrates the creation of entities and relationships.
+
+    Args:
+        folio_instance: The FOLIO instance to create the knowledge graph from
+        entities: Optional list of entity names to filter by
+        subclasses: If True and entities are specified, include all subclasses of the specified entities
+
+    Returns:
+        CustomKnowledgeGraph with filtered entities and relationships
     """
     # First, create entities and chunks, along with hierarchy relationships
-    entity_chunks, entities, added_entities, hierarchy_relationships = create_entities(
-        folio_instance
+    if entities is not None:
+        if subclasses:
+            target_entities = get_all_subclasses(folio_instance, entities)
+            logger.info(f"Target entities with subclasses: {target_entities}")
+        else:
+            target_entities = set(entities)
+            logger.info(f"Target entities without subclasses: {target_entities}")
+
+    entity_chunks, entities_dict, relationships = create_entities(
+        folio_instance, target_entities
     )
 
     # Then, create relationships and chunks from triples
     triple_relationships, triple_chunks = create_predicates(
-        folio_instance, added_entities
+        folio_instance, target_entities
     )
 
     # Combine all relationships
-    relationships = triple_relationships + hierarchy_relationships
-
+    all_relationships = relationships | triple_relationships
     all_chunks = entity_chunks + triple_chunks
 
+    # Convert entities dict to list
+    entities_list = list(entities_dict.values())
+
+    # Convert relationships dict to list
+    relationships_list = list(all_relationships.values())
+
     logger.info(
-        f"Final knowledge graph: {len(all_chunks)} chunks, {len(entities)} entities, {len(relationships)} relationships"
+        f"Final knowledge graph: {len(all_chunks)} chunks, {len(entities_list)} entities, {len(relationships_list)} relationships"
     )
 
     return CustomKnowledgeGraph(
-        chunks=all_chunks, entities=entities, relationships=relationships
+        chunks=all_chunks, entities=entities_list, relationships=relationships_list
     )
 
 

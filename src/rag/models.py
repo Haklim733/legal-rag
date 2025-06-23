@@ -115,29 +115,6 @@ class Entity(BaseModel):
     chunk_ids: List[str] = Field(
         default_factory=list, description="List of chunk IDs where this entity appears"
     )
-    # Add relationship tracking fields
-    outgoing_relationship_ids: List[str] = Field(
-        default_factory=list,
-        description="List of relationship IDs where this entity is the source",
-    )
-    incoming_relationship_ids: List[str] = Field(
-        default_factory=list,
-        description="List of relationship IDs where this entity is the target",
-    )
-
-    def add_outgoing_relationship(self, relationship_id: str):
-        """Add an outgoing relationship ID to this entity."""
-        if relationship_id not in self.outgoing_relationship_ids:
-            self.outgoing_relationship_ids.append(relationship_id)
-
-    def add_incoming_relationship(self, relationship_id: str):
-        """Add an incoming relationship ID to this entity."""
-        if relationship_id not in self.incoming_relationship_ids:
-            self.incoming_relationship_ids.append(relationship_id)
-
-    def get_total_relationships(self) -> int:
-        """Get the total number of relationships for this entity."""
-        return len(self.outgoing_relationship_ids) + len(self.incoming_relationship_ids)
 
 
 class Relationship(BaseModel):
@@ -155,7 +132,7 @@ class Relationship(BaseModel):
         cls, src_id: str, relationship_type: str, tgt_id: str
     ) -> str:
         """Create a unique relationship ID from source, type, and target."""
-        return f"rel_{src_id}_{relationship_type}_{tgt_id}".replace(" ", "_").lower()
+        return f"{src_id}_{relationship_type}_{tgt_id}".replace(" ", "_").lower()
 
 
 class CustomKnowledgeGraph(BaseModel):
@@ -171,6 +148,25 @@ class CustomKnowledgeGraph(BaseModel):
         json_encoders = {
             # Add any custom JSON encoders if needed
         }
+
+    def to_dict(self) -> dict:
+        """Convert the knowledge graph to a dictionary format compatible with LightRAG."""
+        return {
+            "chunks": [chunk.model_dump() for chunk in self.chunks],
+            "entities": [entity.model_dump() for entity in self.entities],
+            "relationships": [rel.model_dump() for rel in self.relationships],
+        }
+
+    def get(self, key: str, default=None):
+        """Provide a get method for dictionary-like access."""
+        if key == "chunks":
+            return [chunk.model_dump() for chunk in self.chunks]
+        elif key == "entities":
+            return [entity.model_dump() for entity in self.entities]
+        elif key == "relationships":
+            return [rel.model_dump() for rel in self.relationships]
+        else:
+            return default
 
 
 SYSTEM_PROMPT = """You are an expert legal knowledge graph analyzer. Extract ONLY the core legal entities and relationships mentioned in the input text.
@@ -321,12 +317,6 @@ def validate_rag_response(response_text: str, query_text: str) -> RAGResponse:
                     description=entity_data.get("description", ""),
                     source_id=entity_data.get("source_id", ""),
                     chunk_ids=entity_data.get("chunk_ids", []),
-                    outgoing_relationship_ids=entity_data.get(
-                        "outgoing_relationship_ids", []
-                    ),
-                    incoming_relationship_ids=entity_data.get(
-                        "incoming_relationship_ids", []
-                    ),
                 )
             )
 
@@ -355,7 +345,19 @@ def validate_rag_response(response_text: str, query_text: str) -> RAGResponse:
     def avg_confidence(concepts):
         if not concepts:
             return 0.0
-        return sum(c.confidence_score for c in concepts) / len(concepts)
+        # For Entity objects, we don't have confidence_score, so use a default
+        # For Relationship objects, we have weight
+        total_weight = 0.0
+        count = 0
+        for concept in concepts:
+            if hasattr(concept, "weight"):
+                total_weight += concept.weight
+                count += 1
+            else:
+                # For entities without weight, use a default confidence
+                total_weight += 0.5
+                count += 1
+        return total_weight / count if count > 0 else 0.0
 
     confidence_summary = {
         "entities": avg_confidence(entities),

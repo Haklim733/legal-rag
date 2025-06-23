@@ -5,12 +5,13 @@ import os
 from pathlib import Path
 import time
 
+from folio import FOLIO
 from lightrag import LightRAG
 from lightrag.kg.shared_storage import initialize_pipeline_status
 from lightrag.llm.ollama import ollama_embed, ollama_model_complete
 from lightrag.utils import EmbeddingFunc
 
-from .embed import load_ontology_for_rag
+from .embed import create_custom_kg, filter_knowledge_graph
 from .models import (
     QueryParam,
     SAMPLE_KG,
@@ -85,10 +86,20 @@ def main(query_text: str = None) -> RAGResponse:
     #     limit=20, max_depth=1
     # )  # Start with a small limit
     # logger.info(f"Loaded {len(documents_to_embed)} FOLIO documents")
+    folio_instance = FOLIO("github", llm=None)
 
-    logger.info("Inserting custom knowledge graph into LightRAG...")
-    rag.insert_custom_kg(SAMPLE_KG)
-    logger.info("Successfully inserted custom knowledge graph")
+    # Create filtered knowledge graph directly
+    logger.info("Creating filtered knowledge graph...")
+    custom_kg = create_custom_kg(
+        folio_instance,
+        entity_filters=["Actor / Player"],  # Include specific entities
+        include_subclasses=True,  # Include all subclasses
+        as_dict=True,
+    )
+
+    logger.info("Inserting filtered custom knowledge graph into LightRAG...")
+    rag.insert_custom_kg(custom_kg)
+    logger.info("Successfully inserted filtered custom knowledge graph")
 
     query_param = QueryParam()
     logger.info(f"QueryParam instance: {query_param}")

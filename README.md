@@ -23,8 +23,9 @@ the query_param.py is the main function to query the document store.
 # issues
 1. the ontology may not be complete.
 2. some subclasses inherit properties from their parents that should be excluded (e.g. Year of Law Degree Graduation)
-3. not all predicates are of interest or have been vetted (only folio: predicates are used here). 
+3. not all predicates are of interest or have been vetted (only folio: predicates and oasis: predicates are used here). 
 4. there are 660 labels with more than 1 classes 
+5. Lightrag requires explicit relationships between entities.
 
 ## TODO
 1. checkout Langchain LLM Transformers
