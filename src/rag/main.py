@@ -18,27 +18,18 @@ from src.docs.models import ExtractionMethod
 from .embed import create_custom_kg
 from .models import (
     QueryParam,
-    SYSTEM_PROMPT,
-    validate_rag_response,
+    extract_json_from_text,
     RAGResponse,
+    Entity,
+    Relationship,
+    ExtractionMode,
+    SYSTEM_PROMPT_SINGLE,
 )
 
 nest_asyncio.apply()
 
 # Configure logging to handle ascii_colors errors gracefully
 logging.getLogger("ascii_colors").setLevel(logging.ERROR)
-
-
-# Suppress ascii_colors errors by redirecting stderr for that specific error
-class SuppressAsciiColorsError:
-    def __enter__(self):
-        self.original_stderr = sys.stderr
-        sys.stderr = open(os.devnull, "w")
-        return self
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        sys.stderr.close()
-        sys.stderr = self.original_stderr
 
 
 logger = logging.getLogger(__name__)
@@ -64,20 +55,20 @@ def clear_cache(working_dir: Path = WORKING_DIR):
             os.remove(working_dir / f)
 
 
-async def initialize_rag():
+async def initialize_rag(llm_model_name: str, embed_model_name: str):
     rag = LightRAG(
         working_dir=WORKING_DIR,
         llm_model_func=ollama_model_complete,
-        llm_model_name="phi3:mini",
+        llm_model_name=llm_model_name,
         llm_model_max_async=4,
         llm_model_max_token_size=8192,
         llm_model_kwargs={
             "host": "localhost:11434",  # Use Ollama service hostname in Docker network
             "options": {
-                "num_ctx": 4096,
-                "temperature": 0.7,  # Add some randomness
-                "seed": int(time.time()) % 1000000,  # Random seed to avoid caching
-                "num_predict": 4096,  # Allow for a much longer response
+                "num_ctx": 8192,
+                "temperature": 0.0,  # Set to 0 for deterministic output
+                "seed": 42,  # Use a fixed seed for reproducible results
+                "num_predict": 8192,  # Allow for a much longer response
             },
         },
         embedding_func=EmbeddingFunc(
@@ -85,7 +76,7 @@ async def initialize_rag():
             max_token_size=256,
             func=lambda texts: ollama_embed(
                 texts,
-                embed_model="all-minilm",
+                embed_model=embed_model_name,
                 host="localhost:11434",  # Use Ollama service hostname in Docker network
             ),
         ),
@@ -97,18 +88,24 @@ async def initialize_rag():
     return rag
 
 
-def main(query_text: str, entities: list[str]) -> RAGResponse:
-
+def main(
+    query_text: str,
+    pdf_path: str = None,
+    entities: list[str] = None,
+    llm_model_name: str = "llama3.1:8b",
+    embed_model_name: str = "llama3.1:8b",
+) -> RAGResponse:
     # Initialize RAG
-    rag = asyncio.run(initialize_rag())
+    rag = asyncio.run(initialize_rag(llm_model_name, embed_model_name))
     logger.info(f"Initialized RAG object: {rag}")
+    logger.info(f"Using LLM model: {llm_model_name}")
+    logger.info(f"Using embedding model: {embed_model_name}")
     clear_cache()
 
     # Load FOLIO ontology data
     logger.info("Loading FOLIO ontology data...")
     folio_instance = FOLIO("github", llm=None)
 
-    # Create filtered knowledge graph directly
     logger.info(f"Creating filtered knowledge graph with entities: {entities}")
     custom_kg = create_custom_kg(
         folio_instance,
@@ -116,74 +113,76 @@ def main(query_text: str, entities: list[str]) -> RAGResponse:
         subclasses=True,
     ).to_dict()
 
-    logger.info("Inserting filtered custom knowledge graph into LightRAG...")
+    logger.info("Inserting custom knowledge graph into LightRAG...")
     rag.insert_custom_kg(custom_kg)
-    logger.info("Successfully inserted filtered custom knowledge graph")
+    logger.info("Successfully inserted custom knowledge graph")
 
     query_param = QueryParam()
     logger.info("Calling rag.query...")
     logger.info(f"Query text: {query_text}")
 
-    # Use ontological system prompt for concept extraction
-    response = rag.query(query_text, param=query_param, system_prompt=SYSTEM_PROMPT)
-    logger.info(f"Raw response: {response}")
+    # Single pass: Extract entities and relationships
+    logger.info("🔄 Single pass: Extracting entities and relationships...")
+    response = rag.query(
+        query_text, param=query_param, system_prompt=SYSTEM_PROMPT_SINGLE
+    )
 
-    # Validate response structure
     try:
-        validated_response = validate_rag_response(response, query_text)
-        logger.info("✅ Response validation successful!")
-        print(validated_response)
-        logger.info(f"📊 Validation Summary:")
-        logger.info(
-            f"   - Total concepts found: {len(validated_response.entities) + len(validated_response.relationships)}"
-        )
-        logger.info(f"   - Entities: {len(validated_response.entities)}")
-        logger.info(f"   - Relationships: {len(validated_response.relationships)}")
+        response_data = extract_json_from_text(response, ExtractionMode.AGGRESSIVE)
+        extracted_entities = []
+        relationships = []
 
-        # Log detailed concept information
-        if validated_response.entities:
-            logger.info("🏢 Entities found:")
-            for entity in validated_response.entities:
-                logger.info(f"   - {entity.entity_name} (type: {entity.entity_type})")
-                logger.info(f"     Description: {entity.description}")
+        # Process entities
+        for entity_data_item in response_data.get("entities", []):
+            entity = Entity(
+                entity_name=entity_data_item.get("entity_name", ""),
+                entity_type=entity_data_item.get("entity_type", "entity"),
+                description=entity_data_item.get("description", ""),
+                # weight defaults to 1.0
+            )
+            extracted_entities.append(entity)
 
-        if validated_response.relationships:
-            logger.info("🔗 Relationships found:")
-            for rel in validated_response.relationships:
-                logger.info(
-                    f"   - {rel.src_id} -> {rel.tgt_id} (weight: {rel.weight:.3f})"
+        # Get entity names for exact matching
+        entity_names = {entity.entity_name for entity in extracted_entities}
+        logger.info(f"Found entities: {entity_names}")
+
+        # Process relationships with exact name matching
+        for rel_data in response_data.get("relationships", []):
+            src_id = rel_data.get("src_id", "")
+            tgt_id = rel_data.get("tgt_id", "")
+
+            # Only create relationships if both entities exist exactly
+            if src_id in entity_names and tgt_id in entity_names:
+                relationship = Relationship(
+                    src_id=src_id,
+                    tgt_id=tgt_id,
+                    description=rel_data.get("description", ""),
+                    keywords=rel_data.get("keywords", ""),
+                    # weight defaults to 1.0
                 )
-                logger.info(f"     Description: {rel.description}")
+                relationships.append(relationship)
+                logger.info(f"✅ Created relationship: {src_id} -> {tgt_id}")
+            else:
+                logger.warning(
+                    f"❌ Skipped relationship: {src_id} -> {tgt_id} (entities not found)"
+                )
 
-        # Return validated response for further processing
-        # Finalize before returning
-        try:
-            asyncio.run(rag.finalize_storages())
-        except Exception as e:
-            logger.warning(f"Error during finalize (non-critical): {e}")
-        return validated_response
-
-    except ValueError as e:
-        logger.error(f"Response validation failed: {e}")
-        logger.error(
-            "Response does not contain valid JSON structure with ontological concepts"
+        logger.info(
+            f"✅ Single pass successful: {len(extracted_entities)} entities, {len(relationships)} relationships"
         )
-        logger.error(f"Raw response: {response}")
-        # Finalize before raising exception
-        try:
-            asyncio.run(rag.finalize_storages())
-        except Exception as finalize_error:
-            logger.warning(f"Error during finalize (non-critical): {finalize_error}")
-        raise
+
     except Exception as e:
-        logger.error(f"Unexpected error during response validation: {e}")
-        logger.error(f"Raw response: {response}")
-        # Finalize before raising exception
-        try:
-            asyncio.run(rag.finalize_storages())
-        except Exception as finalize_error:
-            logger.warning(f"Error during finalize (non-critical): {finalize_error}")
-        raise
+        logger.error(f"❌ Single pass failed: {e}")
+        logger.error(f"Response: {response}")
+        extracted_entities = []
+        relationships = []
+
+    return RAGResponse(
+        query_text=query_text,
+        response_text=response,
+        entities=extracted_entities,
+        relationships=relationships,
+    )
 
 
 if __name__ == "__main__":
@@ -236,6 +235,19 @@ if __name__ == "__main__":
         ],
         help="List of entities to filter the knowledge graph.",
     )
+    # Model configuration arguments
+    parser.add_argument(
+        "--llm-model",
+        type=str,
+        default="llama3.1:8b",
+        help="LLM model name to use (e.g., 'llama3.1:8b', 'mistral:7b-instruct', 'codellama:7b-instruct').",
+    )
+    parser.add_argument(
+        "--embed-model",
+        type=str,
+        default="all-minilm",
+        help="Embedding model name to use (e.g., 'all-minilm', 'nomic-embed-text').",
+    )
 
     args = parser.parse_args()
 
@@ -281,7 +293,12 @@ if __name__ == "__main__":
 
     # Run the main RAG function
     if query_text:
-        response = main(query_text, entities=args.entities)
+        response = main(
+            query_text,
+            entities=args.entities,
+            llm_model_name=args.llm_model,
+            embed_model_name=args.embed_model,
+        )
         print("\n✅ RAG processing complete.")
         print("\n--- Summary ---")
         print(

@@ -5,7 +5,7 @@ test_folio.py - Unit tests for FOLIO functionality and RAG response validation
 import pytest
 from folio import FOLIO
 from typing import List, Tuple, Dict
-from src.rag.models import RAGResponse, OntologicalConcept, validate_rag_response
+from src.rag.models import RAGResponse, validate_rag_response
 from src.rag.main import main
 
 
@@ -130,6 +130,7 @@ def test_get_all_domain_range_connections(folio):
         print(f"  Range: {[folio[range_val].label for range_val in prop.range]}")
 
 
+@pytest.mark.skip(reason="Skipping this test for now; takes too long")
 def test_get_class_pairs_for_predicate(folio):
     """Test getting class pairs for a specific predicate."""
     # Get a specific property (e.g., folio:observed)

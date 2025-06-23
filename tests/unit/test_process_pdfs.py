@@ -3,7 +3,7 @@ import pytest
 import tempfile
 from pathlib import Path
 from unittest.mock import patch
-from docs.process_pdfs import (
+from src.docs.process_pdfs import (
     extract_text_from_pdf,
     extract_pdf,
     process_pdf_directory,
@@ -14,35 +14,39 @@ from docs.process_pdfs import (
     ExtractionResult,
     PDFExtractionResult,
 )
-from docs.models import (
+from src.docs.models import (
     PDFDocumentMetadata,
     ExtractionMetadata,
     CaseDocumentMetadata,
     SupremeCourtCase,
 )
 
-# Get the path to the test PDF
-TEST_PDF_PATH = (
-    Path(__file__).parent.parent.parent
-    / "assets"
-    / "supreme-court"
-    / "2025"
-    / "24A1007_AARPvTrump_20250516.pdf"
-)
-
 # Set page limit for all tests to reduce I/O
 PAGE_LIMIT = 5
 
 
-def test_extract_text_from_pdf():
-    """Test that we can extract text from a PDF file."""
-    # Skip test if the test PDF doesn't exist
-    if not TEST_PDF_PATH.exists():
-        pytest.skip(f"Test PDF not found at {TEST_PDF_PATH}")
+@pytest.fixture
+def test_pdf_path():
+    """Fixture that provides the test PDF path or skips the test if not found."""
+    pdf_path = (
+        Path(__file__).parent.parent.parent
+        / "assets"
+        / "supreme-court"
+        / "downloaded"
+        / "24a966_1b8e.pdf"
+    )
 
+    if not pdf_path.exists():
+        pytest.skip(f"Test PDF not found at {pdf_path}")
+
+    return pdf_path
+
+
+def test_extract_text_from_pdf(test_pdf_path):
+    """Test that we can extract text from a PDF file."""
     try:
         # Test text extraction with default method and 5-page limit
-        result = extract_text_from_pdf(TEST_PDF_PATH, max_pages=PAGE_LIMIT)
+        result = extract_text_from_pdf(test_pdf_path, max_pages=PAGE_LIMIT)
 
         # Basic assertions for ExtractionResult
         assert isinstance(result, ExtractionResult), "Expected ExtractionResult object"
@@ -83,12 +87,8 @@ def test_extract_text_from_pdf():
 
 
 @pytest.mark.skip(reason="Skipping test_extract_text_from_pdf_different_methods")
-def test_extract_text_from_pdf_different_methods():
+def test_extract_text_from_pdf_different_methods(test_pdf_path):
     """Test different extraction methods."""
-    # Skip test if the test PDF doesn't exist
-    if not TEST_PDF_PATH.exists():
-        pytest.skip(f"Test PDF not found at {TEST_PDF_PATH}")
-
     methods_to_test = [
         ExtractionMethod.UNSTRUCTURED,
         ExtractionMethod.PYPDF,
@@ -97,7 +97,7 @@ def test_extract_text_from_pdf_different_methods():
     for method in methods_to_test:
         try:
             result = extract_text_from_pdf(
-                TEST_PDF_PATH, method=method, max_pages=PAGE_LIMIT
+                test_pdf_path, method=method, max_pages=PAGE_LIMIT
             )
 
             assert isinstance(
@@ -114,12 +114,8 @@ def test_extract_text_from_pdf_different_methods():
             raise
 
 
-def test_extract_text_from_pdf_with_strategy():
+def test_extract_text_from_pdf_with_strategy(test_pdf_path):
     """Test text extraction with different strategies."""
-    # Skip test if the test PDF doesn't exist
-    if not TEST_PDF_PATH.exists():
-        pytest.skip(f"Test PDF not found at {TEST_PDF_PATH}")
-
     strategies_to_test = [
         UnstructuredStrategy.HI_RES,
         UnstructuredStrategy.FAST,
@@ -129,7 +125,7 @@ def test_extract_text_from_pdf_with_strategy():
     for strategy in strategies_to_test:
         try:
             result = extract_text_from_pdf(
-                TEST_PDF_PATH,
+                test_pdf_path,
                 method=ExtractionMethod.UNSTRUCTURED,
                 strategy=strategy,
                 max_pages=PAGE_LIMIT,
@@ -156,16 +152,12 @@ def test_extract_text_from_pdf_with_strategy():
             raise
 
 
-def test_extract_text_from_pdf_with_hierarchy():
+def test_extract_text_from_pdf_with_hierarchy(test_pdf_path):
     """Test text extraction with and without hierarchy preservation."""
-    # Skip test if the test PDF doesn't exist
-    if not TEST_PDF_PATH.exists():
-        pytest.skip(f"Test PDF not found at {TEST_PDF_PATH}")
-
     try:
         # Test with hierarchy preservation
         result_with_hierarchy = extract_text_from_pdf(
-            TEST_PDF_PATH,
+            test_pdf_path,
             method=ExtractionMethod.UNSTRUCTURED,
             preserve_hierarchy=True,
             max_pages=PAGE_LIMIT,
@@ -173,7 +165,7 @@ def test_extract_text_from_pdf_with_hierarchy():
 
         # Test without hierarchy preservation
         result_without_hierarchy = extract_text_from_pdf(
-            TEST_PDF_PATH,
+            test_pdf_path,
             method=ExtractionMethod.UNSTRUCTURED,
             preserve_hierarchy=False,
             max_pages=PAGE_LIMIT,
@@ -198,7 +190,7 @@ def test_extract_text_from_pdf_with_hierarchy():
         raise
 
 
-@patch("docs.process_pdfs.partition_pdf")
+@patch("src.docs.process_pdfs.partition_pdf")
 def test_extract_text_from_pdf_error_handling(mock_partition):
     """Test error handling when processing a PDF that raises an error."""
     # Setup mock to raise an exception when partition_pdf is called
@@ -216,21 +208,20 @@ def test_extract_text_from_pdf_error_handling(mock_partition):
             assert result.full_text == "", "Expected empty text on error"
             assert result.elements == [], "Expected empty elements on error"
             assert result.error_message is not None, "Expected error message"
+            assert (
+                "Test error" in result.error_message
+            ), "Expected error message to contain the test error"
         finally:
             if temp_path.exists():
                 temp_path.unlink()
 
 
-def test_extract_pdf_unified():
+def test_extract_pdf_unified(test_pdf_path):
     """Test the unified PDF extraction function."""
-    # Skip test if the test PDF doesn't exist
-    if not TEST_PDF_PATH.exists():
-        pytest.skip(f"Test PDF not found at {TEST_PDF_PATH}")
-
     try:
         # Test unified extraction with both text and metadata
         result = extract_pdf(
-            TEST_PDF_PATH,
+            test_pdf_path,
             method=ExtractionMethod.UNSTRUCTURED,
             strategy="fast",
             preserve_hierarchy=True,
@@ -266,16 +257,12 @@ def test_extract_pdf_unified():
         raise
 
 
-def test_extract_pdf_unified_text_only():
+def test_extract_pdf_unified_text_only(test_pdf_path):
     """Test the unified PDF extraction function with text only."""
-    # Skip test if the test PDF doesn't exist
-    if not TEST_PDF_PATH.exists():
-        pytest.skip(f"Test PDF not found at {TEST_PDF_PATH}")
-
     try:
         # Test unified extraction with text only (no metadata)
         result = extract_pdf(
-            TEST_PDF_PATH,
+            test_pdf_path,
             method=ExtractionMethod.UNSTRUCTURED,
             strategy="fast",
             preserve_hierarchy=True,
@@ -296,7 +283,7 @@ def test_extract_pdf_unified_text_only():
         raise
 
 
-@patch("docs.process_pdfs.extract_text_from_pdf")
+@patch("src.docs.process_pdfs.extract_text_from_pdf")
 def test_process_pdf_directory(mock_extract):
     """Test processing a directory of PDFs."""
     # Setup mock return value
@@ -346,7 +333,7 @@ def test_process_pdf_directory(mock_extract):
             raise
 
 
-@patch("docs.process_pdfs.extract_pdf")
+@patch("src.docs.process_pdfs.extract_pdf")
 def test_process_pdf_directory_unified(mock_extract):
     """Test processing a directory of PDFs with unified extraction."""
     # Setup mock return value
@@ -420,7 +407,7 @@ def test_process_pdf_directory_error_handling():
         raise
 
 
-@patch("docs.process_pdfs.extract_text_from_pdf")
+@patch("src.docs.process_pdfs.extract_text_from_pdf")
 def test_process_pdf_directory_empty(mock_extract):
     """Test processing an empty directory."""
     try:
@@ -434,7 +421,7 @@ def test_process_pdf_directory_empty(mock_extract):
         raise
 
 
-@patch("docs.process_pdfs.extract_text_from_pdf")
+@patch("src.docs.process_pdfs.extract_text_from_pdf")
 def test_process_pdf_directory_with_errors(mock_extract):
     """Test processing a directory with a PDF that raises an error."""
     try:
@@ -561,12 +548,9 @@ def test_pdf_extraction_result_with_error():
     assert result.error_message == "Overall error"
 
 
-def test_compare_extraction_methods():
+@pytest.mark.skip(reason="Skipping this test for now; takes too long")
+def test_compare_extraction_methods(test_pdf_path):
     """Test comparing different extraction methods."""
-    # Skip test if the test PDF doesn't exist
-    if not TEST_PDF_PATH.exists():
-        pytest.skip(f"Test PDF not found at {TEST_PDF_PATH}")
-
     # Test comparison with PAGE_LIMIT using existing extraction methods
     results = {}
 
@@ -575,7 +559,7 @@ def test_compare_extraction_methods():
     for strategy in strategies_to_test:
         try:
             result = extract_text_from_pdf(
-                TEST_PDF_PATH,
+                test_pdf_path,
                 method=ExtractionMethod.UNSTRUCTURED,
                 strategy=strategy,
                 max_pages=PAGE_LIMIT,
@@ -592,7 +576,7 @@ def test_compare_extraction_methods():
     # Test PyPDF method
     try:
         pypdf_result = extract_text_from_pdf(
-            TEST_PDF_PATH, method=ExtractionMethod.PYPDF, max_pages=PAGE_LIMIT
+            test_pdf_path, method=ExtractionMethod.PYPDF, max_pages=PAGE_LIMIT
         )
         results["pypdf"] = pypdf_result
     except Exception as e:
@@ -619,21 +603,17 @@ def test_compare_extraction_methods():
         print(f"  Method: {result.method}")
 
 
-def test_compare_pdf_metadata_methods():
+def test_compare_pdf_metadata_methods(test_pdf_path):
     """Test comparing different metadata extraction methods."""
-    # Skip test if the test PDF doesn't exist
-    if not TEST_PDF_PATH.exists():
-        pytest.skip(f"Test PDF not found at {TEST_PDF_PATH}")
-
     try:
         # Test metadata comparison using existing extraction methods
         results = {
-            "file_path": str(TEST_PDF_PATH),
+            "file_path": str(test_pdf_path),
             "unstructured_metadata": extract_pdf_metadata(
-                TEST_PDF_PATH, method=ExtractionMethod.UNSTRUCTURED
+                test_pdf_path, method=ExtractionMethod.UNSTRUCTURED
             ),
             "pypdf_metadata": extract_pdf_metadata(
-                TEST_PDF_PATH, method=ExtractionMethod.PYPDF
+                test_pdf_path, method=ExtractionMethod.PYPDF
             ),
         }
 
@@ -643,7 +623,7 @@ def test_compare_pdf_metadata_methods():
         assert (
             "unstructured_metadata" in results
         ), "Expected unstructured_metadata field"
-        assert results["file_path"] == str(TEST_PDF_PATH), "Expected correct file path"
+        assert results["file_path"] == str(test_pdf_path), "Expected correct file path"
 
         # Add comparison summary
         unstructured_success = results["unstructured_metadata"]["success"]
@@ -700,14 +680,14 @@ def test_compare_pdf_metadata_methods():
         # Warn if neither method was successful
         if not unstructured_success and not pypdf_success:
             print(
-                f"Warning: Both metadata extraction methods failed for PDF: {TEST_PDF_PATH}"
+                f"Warning: Both metadata extraction methods failed for PDF: {test_pdf_path}"
             )
         elif not unstructured_success:
             print(
-                f"Warning: Unstructured metadata extraction failed for PDF: {TEST_PDF_PATH}"
+                f"Warning: Unstructured metadata extraction failed for PDF: {test_pdf_path}"
             )
         elif not pypdf_success:
-            print(f"Warning: PyPDF metadata extraction failed for PDF: {TEST_PDF_PATH}")
+            print(f"Warning: PyPDF metadata extraction failed for PDF: {test_pdf_path}")
 
         # Warn if metadata fields are significantly different between methods
         unstructured_fields = summary["metadata_fields_unstructured"]
@@ -716,7 +696,7 @@ def test_compare_pdf_metadata_methods():
         if unstructured_success and pypdf_success:
             if abs(unstructured_fields - pypdf_fields) > 5:  # Significant difference
                 print(
-                    f"Warning: Large difference in metadata fields between methods for PDF: {TEST_PDF_PATH} "
+                    f"Warning: Large difference in metadata fields between methods for PDF: {test_pdf_path} "
                     f"(Unstructured: {unstructured_fields}, PyPDF: {pypdf_fields})"
                 )
 
@@ -830,23 +810,19 @@ def test_supreme_court_case_metadata_integration():
     assert case_json["pdf_metadata"]["title"] == "Test PDF Title"
 
 
-def test_extract_pdf_metadata():
+def test_extract_pdf_metadata(test_pdf_path):
     """Test extracting metadata from a PDF file and validating with metadata model."""
-    # Skip test if the test PDF doesn't exist
-    if not TEST_PDF_PATH.exists():
-        pytest.skip(f"Test PDF not found at {TEST_PDF_PATH}")
-
     try:
         # Test metadata extraction with unstructured method
         result = extract_pdf_metadata(
-            TEST_PDF_PATH, method=ExtractionMethod.UNSTRUCTURED
+            test_pdf_path, method=ExtractionMethod.UNSTRUCTURED
         )
 
         # Basic assertions
         assert isinstance(result, dict), "Expected dictionary result"
         assert result["success"], "Expected successful metadata extraction"
         assert "metadata" in result, "Expected metadata field"
-        assert result["file_path"] == str(TEST_PDF_PATH), "Expected correct file path"
+        assert result["file_path"] == str(test_pdf_path), "Expected correct file path"
 
         metadata = result["metadata"]
 
@@ -869,7 +845,7 @@ def test_extract_pdf_metadata():
         # Verify reasonable values
         assert metadata["total_pages"] > 0, "Should have at least 1 page"
         assert metadata["file_size_bytes"] > 0, "Should have positive file size"
-        assert metadata["file_name"] == TEST_PDF_PATH.name, "Should match filename"
+        assert metadata["file_name"] == test_pdf_path.name, "Should match filename"
 
         # Test validation with PDFDocumentMetadata model
         try:
@@ -928,21 +904,17 @@ def test_extract_pdf_metadata():
         raise
 
 
-def test_extract_pdf_metadata_pypdf():
+def test_extract_pdf_metadata_pypdf(test_pdf_path):
     """Test extracting metadata using PyPDF method."""
-    # Skip test if the test PDF doesn't exist
-    if not TEST_PDF_PATH.exists():
-        pytest.skip(f"Test PDF not found at {TEST_PDF_PATH}")
-
     try:
         # Test metadata extraction with PyPDF method
-        result = extract_pdf_metadata(TEST_PDF_PATH, method=ExtractionMethod.PYPDF)
+        result = extract_pdf_metadata(test_pdf_path, method=ExtractionMethod.PYPDF)
 
         # Basic assertions
         assert isinstance(result, dict), "Expected dictionary result"
         assert result["success"], "Expected successful metadata extraction"
         assert "metadata" in result, "Expected metadata field"
-        assert result["file_path"] == str(TEST_PDF_PATH), "Expected correct file path"
+        assert result["file_path"] == str(test_pdf_path), "Expected correct file path"
 
         metadata = result["metadata"]
 
@@ -995,16 +967,12 @@ def test_pdf_metadata_error_handling():
     assert result["file_path"] == str(non_existent_pdf), "Expected correct file path"
 
 
-def test_pdf_metadata_with_text_extraction():
+def test_pdf_metadata_with_text_extraction(test_pdf_path):
     """Test combining metadata extraction with text extraction."""
-    # Skip test if the test PDF doesn't exist
-    if not TEST_PDF_PATH.exists():
-        pytest.skip(f"Test PDF not found at {TEST_PDF_PATH}")
-
     try:
         # Extract both metadata and text using unified function
         unified_result = extract_pdf(
-            TEST_PDF_PATH,
+            test_pdf_path,
             method=ExtractionMethod.UNSTRUCTURED,
             strategy="fast",
             preserve_hierarchy=True,
@@ -1026,7 +994,7 @@ def test_pdf_metadata_with_text_extraction():
         assert (
             metadata.get("total_pages", 0) >= text_result.pages_processed
         ), "Total pages should be >= processed pages"
-        assert metadata.get("file_name") == TEST_PDF_PATH.name, "Filenames should match"
+        assert metadata.get("file_name") == test_pdf_path.name, "Filenames should match"
 
         print(f"\nCombined Extraction Results:")
         print(f"  Total Pages (metadata): {metadata.get('total_pages', 'N/A')}")

@@ -8,8 +8,8 @@ sleep 10
 echo "Pulling required Ollama models..."
 
 # Pull the LLM model used in main.py
-echo "Pulling phi3:mini model..."
-docker exec ollama ollama pull phi3:mini
+echo "Pulling llama3.1:8b model..."
+docker exec ollama ollama pull llama3.1:8b
 
 # Pull the embedding model used in main.py
 echo "Pulling all-minilm model..."

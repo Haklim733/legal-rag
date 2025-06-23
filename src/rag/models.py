@@ -5,8 +5,21 @@ import json
 import logging
 import re
 from enum import Enum
+import sys
 
 logger = logging.getLogger(__name__)
+
+
+# Suppress ascii_colors errors by redirecting stderr for that specific error
+class SuppressAsciiColorsError:
+    def __enter__(self):
+        self.original_stderr = sys.stderr
+        sys.stderr = open(os.devnull, "w")
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        sys.stderr.close()
+        sys.stderr = self.original_stderr
 
 
 class ExtractionMode(Enum):
@@ -206,11 +219,32 @@ class Entity(BaseModel):
 
     entity_name: str = Field(..., description="Name of the entity (clean name)")
     entity_type: str = Field(..., description="Type of the entity (e.g., 'OWLClass')")
-    description: str = Field(..., description="Description of the entity")
-    source_id: str = Field(..., description="Source chunk ID (not full IRI)")
-    chunk_ids: List[str] = Field(
-        default_factory=list, description="List of chunk IDs where this entity appears"
+    description: Optional[str] = Field(
+        default="", description="Description of the entity"
     )
+    source_id: str = Field(default="", description="Source chunk ID (not full IRI)")
+    chunk_ids: List[str] = Field(
+        default_factory=list, description="List of chunk IDs where the entity is found"
+    )
+    weight: float = Field(
+        default=1.0, description="Confidence weight of the entity (0.0 to 1.0)"
+    )
+
+    @field_validator("entity_name", "entity_type")
+    @classmethod
+    def check_not_empty(cls, v: str) -> str:
+        """Ensure that critical fields are not empty."""
+        if not v or not v.strip():
+            raise ValueError("Field must not be empty")
+        return v
+
+    @field_validator("weight")
+    @classmethod
+    def validate_weight(cls, v: float) -> float:
+        """Ensure weight is between 0.0 and 1.0."""
+        if not 0.0 <= v <= 1.0:
+            raise ValueError("Weight must be between 0.0 and 1.0")
+        return v
 
 
 class Relationship(BaseModel):
@@ -218,18 +252,43 @@ class Relationship(BaseModel):
 
     src_id: str = Field(..., description="Source entity ID (clean name)")
     tgt_id: str = Field(..., description="Target entity ID (clean name)")
-    description: str = Field(..., description="Description of the relationship")
-    keywords: str = Field(..., description="Keywords associated with the relationship")
-    weight: float = Field(..., description="Weight of the relationship")
-    source_id: str = Field(..., description="Source chunk ID for this relationship")
+    description: Optional[str] = Field(
+        default="", description="Description of the relationship"
+    )
+    keywords: str = Field(
+        default="", description="Keywords associated with the relationship"
+    )
+    source_id: str = Field(
+        default="", description="Source chunk ID for this relationship"
+    )
+    weight: float = Field(
+        default=1.0, description="Confidence weight of the relationship (0.0 to 1.0)"
+    )
 
     @field_validator("keywords")
     @classmethod
     def validate_keywords(cls, v):
-        """Convert keywords to string if it's a list."""
+        """Convert keywords to string if it's a list and ensure it is not empty."""
         if isinstance(v, list):
-            return ", ".join(v)
-        return str(v)
+            v = ", ".join(v)
+        s = str(v)
+        return s
+
+    @field_validator("description", "src_id", "tgt_id")
+    @classmethod
+    def check_not_empty(cls, v: str) -> str:
+        """Ensure that critical fields are not empty."""
+        if not v or not v.strip():
+            raise ValueError("Field must not be empty")
+        return v
+
+    @field_validator("weight")
+    @classmethod
+    def validate_weight(cls, v: float) -> float:
+        """Ensure weight is between 0.0 and 1.0."""
+        if not 0.0 <= v <= 1.0:
+            raise ValueError("Weight must be between 0.0 and 1.0")
+        return v
 
     @classmethod
     def create_relationship_id(
@@ -273,49 +332,38 @@ class CustomKnowledgeGraph(BaseModel):
             return default
 
 
-SYSTEM_PROMPT = """
-<role>
-You are an expert legal knowledge graph analyzer. Extract ONLY the legal entities and relationships in the legal knowledge graph.
-<role>
+SYSTEM_PROMPT_SINGLE = """Extract legal entities and relationships from the text. Return ONLY valid JSON.
 
-CRITICAL: You MUST respond with ONLY a valid JSON object. No additional text, explanations, or formatting outside the JSON structure.
+INSTRUCTIONS:
+1. First, identify all legal entities (people, organizations, courts, agencies)
+2. Use EXACT names as they appear in the text
+3. Create relationships between entities using ONLY the exact entity names you identified
+4. Do NOT create relationships with entities not in your entities list
 
-YOUR OUTPUT MUST MATCH THE JSON FORMAT BELOW:
-<json_template>
+REQUIRED FORMAT:
 {{
     "entities": [
         {{
-            "entity_name": "entity_name",
-            "entity_type": "entity_type", 
-            "description": "brief description from the text",
-            "weight": 0.85
+            "entity_name": "EXACT name from text",
+            "entity_type": "Person|Court|Agency|Organization",
+            "description": "brief description"
         }}
     ],
     "relationships": [
         {{
-            "src_id": "subject",
-            "tgt_id": "object",
-            "description": "brief description from the text",
-            "keywords": "keywords from the text",
-            "weight": 0.85
+            "src_id": "EXACT entity_name from entities list above",
+            "tgt_id": "EXACT entity_name from entities list above",
+            "description": "relationship description",
+            "keywords": "comma-separated keywords"
         }}
     ]
 }}
-<json_template>
 
-EXTRACTION RULES:
-1. Extract ONLY entities and relationships explicitly mentioned in the input text
-2. Use the exact names/terms from the text (e.g., "Lawyer" not "Agent/Role")
-3. For relationships, identify the subject (src_id) and object (tgt_id) entities
-4. Provide brief, factual descriptions based on the text
-5. Assign confidence weights between 0.0 and 1.0
-6. Include relevant keywords that describe the relationship
-
-EXAMPLES:
-- Entity: "John Smith" (entity_name), "Lawyer" (entity_type), "attorney representing client" (description)
-- Relationship: "John Smith" (src_id) -> "Jane Doe" (tgt_id), "represents client in legal matter" (description), "legal representation" (keywords)
-
-RESPOND WITH ONLY THE JSON OBJECT - NO OTHER TEXT."""
+CRITICAL RULES:
+- Use EXACT entity names from the text
+- src_id and tgt_id MUST match entity_name exactly
+- Return ONLY JSON, no explanations or markdown
+- Do NOT generate Python code or other text"""
 
 
 class RAGResponse(BaseModel):
@@ -327,29 +375,246 @@ class RAGResponse(BaseModel):
     relationships: List[Relationship] = Field(
         ..., description="Relationships found in the query"
     )
-    overall: dict = Field(..., description="Summary of confidence scores")
 
-    @field_validator("overall")
-    @classmethod
-    def validate_overall(cls, v):
-        """Validate overall confidence structure."""
-        required_keys = [
-            "entities",
-            "relationships",
-            "overall",
+
+def extract_and_validate_json(
+    response_text: str, extraction_mode: str = "aggressive"
+) -> dict:
+    """
+    Extract and validate JSON from response text.
+
+    Args:
+        response_text: Raw response text from RAG
+        extraction_mode: Mode for JSON extraction (strict, lenient, aggressive)
+
+    Returns:
+        Dictionary containing the parsed JSON data
+
+    Raises:
+        ValueError: If JSON cannot be extracted or validated
+    """
+    logger.info(f"Raw response text length: {len(response_text)}")
+    logger.info(f"Response text starts with: {response_text[:100]}")
+
+    # Convert string to enum
+    if extraction_mode == "strict":
+        mode = ExtractionMode.STRICT
+    elif extraction_mode == "lenient":
+        mode = ExtractionMode.LENIENT
+    elif extraction_mode == "aggressive":
+        mode = ExtractionMode.AGGRESSIVE
+    else:
+        mode = ExtractionMode.STRICT
+
+    # Extract JSON
+    try:
+        response_data = extract_json_from_text(response_text, mode)
+        logger.info("✅ Successfully extracted JSON from response")
+        logger.info(f"Response data keys: {list(response_data.keys())}")
+        logger.info(f"Number of entities: {len(response_data.get('entities', []))}")
+        logger.info(
+            f"Number of relationships: {len(response_data.get('relationships', []))}"
+        )
+
+        # Validate JSON structure
+        if not isinstance(response_data, dict):
+            raise ValueError("Response data is not a dictionary")
+
+        if "entities" not in response_data or "relationships" not in response_data:
+            raise ValueError(
+                "Response missing required 'entities' or 'relationships' keys"
+            )
+
+        if not isinstance(response_data["entities"], list) or not isinstance(
+            response_data["relationships"], list
+        ):
+            raise ValueError("'entities' and 'relationships' must be lists")
+
+        return response_data
+
+    except Exception as e:
+        logger.error(f"❌ Failed to extract JSON: {e}")
+        logger.error(f"Raw response: {response_text}")
+        raise
+
+
+def create_fallback_response() -> dict:
+    """
+    Create a fallback response when JSON extraction fails.
+
+    Returns:
+        Dictionary with fallback entities and relationships
+    """
+    logger.warning("Creating fallback response due to JSON extraction failure")
+    return {
+        "entities": [
+            {
+                "entity_name": "Lawyer",
+                "entity_type": "Legal Services Provider",
+                "description": "Legal professional providing services",
+            }
+        ],
+        "relationships": [
+            {
+                "src_id": "Lawyer",
+                "tgt_id": "Client",
+                "description": "Legal representation relationship",
+                "keywords": "represents, advises, counsels",
+            }
+        ],
+    }
+
+
+def parse_entities_from_response(response_data: dict) -> List[Entity]:
+    """
+    Parse entities from the response data.
+
+    Args:
+        response_data: Dictionary containing the parsed JSON response
+
+    Returns:
+        List of Entity objects
+    """
+    entities = []
+
+    if "entities" not in response_data:
+        logger.warning("No 'entities' key found in response_data")
+        return entities
+
+    logger.info(f"Found {len(response_data['entities'])} entities in response")
+
+    for i, entity_data in enumerate(response_data["entities"]):
+        try:
+            logger.info(f"Processing entity {i}: {entity_data}")
+
+            # Validate entity data structure
+            if not isinstance(entity_data, dict):
+                logger.warning(f"Entity {i} is not a dictionary: {entity_data}")
+                continue
+
+            if "entity_name" not in entity_data or "entity_type" not in entity_data:
+                logger.warning(f"Entity {i} missing required fields: {entity_data}")
+                continue
+
+            entity = Entity(
+                entity_name=entity_data.get("entity_name", ""),
+                entity_type=entity_data.get("entity_type", "entity"),
+                description=entity_data.get("description", ""),
+                source_id=entity_data.get("source_id", ""),
+                chunk_ids=entity_data.get("chunk_ids", []),
+            )
+            entities.append(entity)
+            logger.info(f"Successfully created entity: {entity.entity_name}")
+        except Exception as e:
+            logger.warning(f"Failed to create entity from data {entity_data}: {e}")
+            continue
+
+    logger.info(f"Successfully parsed {len(entities)} entities")
+    return entities
+
+
+def parse_relationships_from_response(
+    response_data: dict, entity_names: set
+) -> List[Relationship]:
+    """
+    Parse relationships from the response data with exact entity name matching.
+
+    Args:
+        response_data: Dictionary containing the parsed JSON response
+        entity_names: Set of valid entity names for exact matching
+
+    Returns:
+        List of Relationship objects
+    """
+    relationships = []
+
+    if "relationships" not in response_data:
+        logger.warning("No 'relationships' key found in response_data")
+        return relationships
+
+    logger.info(f"Available entity names for relationships: {entity_names}")
+    logger.info(
+        f"Found {len(response_data['relationships'])} relationships in response"
+    )
+
+    def find_entities_in_string(id_string, names):
+        """Finds entity names within a string. Prioritizes exact match."""
+        logger.info(f"Looking for '{id_string}' in entity names: {names}")
+        if id_string in names:
+            logger.info(f"Found exact match: {id_string}")
+            return [id_string]
+        # Try case-insensitive matching
+        id_string_lower = id_string.lower()
+        found = [name for name in names if name.lower() == id_string_lower]
+        if found:
+            logger.info(f"Found case-insensitive match: {found}")
+            return found
+        # Try partial matching
+        found = [
+            name
+            for name in names
+            if name.lower() in id_string_lower or id_string_lower in name.lower()
         ]
-        for key in required_keys:
-            if key not in v:
-                raise ValueError(f"Missing required key '{key}' in overall")
-            if not isinstance(v[key], (int, float)) or v[key] < 0 or v[key] > 1:
-                raise ValueError(
-                    f"Confidence score for '{key}' must be between 0.0 and 1.0"
+        logger.info(f"Found partial matches: {found}")
+        return found
+
+    for i, rel_data in enumerate(response_data["relationships"]):
+        try:
+            logger.info(f"Processing relationship {i}: {rel_data}")
+
+            # Validate relationship data structure
+            if not isinstance(rel_data, dict):
+                logger.warning(f"Relationship {i} is not a dictionary: {rel_data}")
+                continue
+
+            if "src_id" not in rel_data or "tgt_id" not in rel_data:
+                logger.warning(f"Relationship {i} missing required fields: {rel_data}")
+                continue
+
+            src_id_raw = rel_data.get("src_id", "")
+            tgt_id_raw = rel_data.get("tgt_id", "")
+
+            src_ids = find_entities_in_string(src_id_raw, entity_names)
+            tgt_ids = find_entities_in_string(tgt_id_raw, entity_names)
+
+            logger.info(f"Found src_ids: {src_ids} for '{src_id_raw}'")
+            logger.info(f"Found tgt_ids: {tgt_ids} for '{tgt_id_raw}'")
+
+            if not src_ids or not tgt_ids:
+                logger.warning(
+                    f"Skipping relationship with ambiguous or missing src/tgt: '{src_id_raw}' -> '{tgt_id_raw}'"
                 )
-        return v
+                continue
+
+            # Validate keywords against knowledge graph
+            keywords = rel_data.get("keywords", "")
+            # Handle cases where keywords are returned as a list
+            if isinstance(keywords, list):
+                keywords = ", ".join(keywords)
+
+            for src_id in src_ids:
+                for tgt_id in tgt_ids:
+                    relationship = Relationship(
+                        src_id=src_id,
+                        tgt_id=tgt_id,
+                        description=rel_data.get("description", ""),
+                        keywords=keywords,
+                        source_id=rel_data.get("source_id", ""),
+                    )
+                    relationships.append(relationship)
+                    logger.info(
+                        f"Successfully created relationship: {src_id} -> {tgt_id}"
+                    )
+        except Exception as e:
+            logger.warning(f"Failed to create relationship from data {rel_data}: {e}")
+            continue
+
+    logger.info(f"Successfully parsed {len(relationships)} relationships")
+    return relationships
 
 
 def validate_rag_response(
-    response_text: str, query_text: str, extraction_mode: str = "strict"
+    response_text: str, query_text: str, extraction_mode: str = "aggressive"
 ) -> RAGResponse:
     """
     Validate and parse RAG response to ensure it contains proper ontological concepts.
@@ -366,149 +631,29 @@ def validate_rag_response(
         ValueError: If response doesn't contain valid JSON structure
         ValidationError: If response doesn't meet ontological concept requirements
     """
-    # Convert string to enum
-    if extraction_mode == "strict":
-        mode = ExtractionMode.STRICT
-    elif extraction_mode == "lenient":
-        mode = ExtractionMode.LENIENT
-    elif extraction_mode == "aggressive":
-        mode = ExtractionMode.AGGRESSIVE
-    else:
-        mode = ExtractionMode.STRICT
-
-    # Use the new JSON extractor
+    # Extract and validate JSON
     try:
-        response_data = extract_json_from_text(response_text, mode)
-        logger.info("✅ Successfully extracted JSON from response")
+        response_data = extract_and_validate_json(response_text, extraction_mode)
     except Exception as e:
-        logger.error(f"❌ Failed to extract JSON: {e}")
-        logger.error(f"Raw response: {response_text}")
-
-        # Create a fallback response when JSON extraction fails
-        logger.warning("Creating fallback response due to JSON extraction failure")
-        response_data = {
-            "entities": [
-                {
-                    "entity_name": "Lawyer",
-                    "entity_type": "Legal Services Provider",
-                    "description": "Legal professional providing services",
-                    "weight": 0.5,
-                }
-            ],
-            "relationships": [
-                {
-                    "src_id": "Lawyer",
-                    "tgt_id": "Client",
-                    "description": "Legal representation relationship",
-                    "keywords": "represents, advises, counsels",
-                    "weight": 0.5,
-                }
-            ],
-        }
-
-    # Extract ontological concepts from response
-    entities = []
-    relationships = []
+        logger.error(f"JSON extraction failed: {e}")
+        response_data = create_fallback_response()
 
     # Parse entities
-    if "entities" in response_data:
-        for entity_data in response_data["entities"]:
-            try:
-                entity = Entity(
-                    entity_name=entity_data.get("entity_name", ""),
-                    entity_type=entity_data.get("entity_type", "entity"),
-                    description=entity_data.get("description", ""),
-                    source_id=entity_data.get("source_id", ""),
-                    chunk_ids=entity_data.get("chunk_ids", []),
-                )
-                entities.append(entity)
-            except Exception as e:
-                logger.warning(f"Failed to create entity from data {entity_data}: {e}")
-                continue
+    entities = parse_entities_from_response(response_data)
 
     # Parse relationships
-    if "relationships" in response_data:
-        entity_names = {entity.entity_name for entity in entities}
+    entity_names = {entity.entity_name for entity in entities}
+    relationships = parse_relationships_from_response(response_data, entity_names)
 
-        def find_entities_in_string(id_string, names):
-            """Finds entity names within a string. Prioritizes exact match."""
-            if id_string in names:
-                return [id_string]
-            found = [name for name in names if name in id_string]
-            return found
-
-        for rel_data in response_data["relationships"]:
-            try:
-                src_id_raw = rel_data.get("src_id", "")
-                tgt_id_raw = rel_data.get("tgt_id", "")
-
-                src_ids = find_entities_in_string(src_id_raw, entity_names)
-                tgt_ids = find_entities_in_string(tgt_id_raw, entity_names)
-
-                if not src_ids or not tgt_ids:
-                    logger.warning(
-                        f"Skipping relationship with ambiguous or missing src/tgt: '{src_id_raw}' -> '{tgt_id_raw}'"
-                    )
-                    continue
-
-                # Validate keywords against knowledge graph
-                keywords = rel_data.get("keywords", "")
-                # Handle cases where keywords are returned as a list
-                if isinstance(keywords, list):
-                    keywords = ", ".join(keywords)
-
-                # if not validate_keywords_against_kg(keywords):
-                #     logger.warning(
-                #         f"Invalid keywords found: {keywords}. Valid keywords: {get_valid_keywords_from_kg()}"
-                #     )
-
-                for src_id in src_ids:
-                    for tgt_id in tgt_ids:
-                        relationship = Relationship(
-                            src_id=src_id,
-                            tgt_id=tgt_id,
-                            description=rel_data.get("description", ""),
-                            keywords=keywords,
-                            weight=rel_data.get("weight", 0.5),
-                            source_id=rel_data.get("source_id", ""),
-                        )
-                        relationships.append(relationship)
-            except Exception as e:
-                logger.warning(
-                    f"Failed to create relationship from data {rel_data}: {e}"
-                )
-                continue
-
-    # Calculate confidence summary
-    def avg_confidence(concepts):
-        if not concepts:
-            return 0.0
-        # For Entity objects, we don't have confidence_score, so use a default
-        # For Relationship objects, we have weight
-        total_weight = 0.0
-        count = 0
-        for concept in concepts:
-            if hasattr(concept, "weight"):
-                total_weight += concept.weight
-                count += 1
-            else:
-                # For entities without weight, use a default confidence
-                total_weight += 0.5
-                count += 1
-        return total_weight / count if count > 0 else 0.0
-
-    confidence_summary = {
-        "entities": avg_confidence(entities),
-        "relationships": avg_confidence(relationships),
-        "overall": avg_confidence(entities + relationships),
-    }
+    logger.info(
+        f"Final result: {len(entities)} entities, {len(relationships)} relationships"
+    )
 
     return RAGResponse(
         query_text=query_text,
         response_text=response_text,
         entities=entities,
         relationships=relationships,
-        overall=confidence_summary,
     )
 
 
@@ -597,7 +742,6 @@ SAMPLE_KG = {
             "src_id": "entity_lawyer",
             "tgt_id": "entity_legal_services_buyer",
             "description": "'Represented' in a legal context refers to the act of acting on behalf of another person or entity in legal matters. This involves a representative, such as a lawyer, advocating, making decisions, or taking actions under the authority and in the interest of the represented party.",
-            "weight": 1.0,
             "keywords": "represents, legal representation, advises, counsels",
             "source_id": "lawyer_represents_legal_services_buyer",
         },
@@ -612,7 +756,6 @@ SAMPLE_KG = {
             "src_id": "entity_tenant",
             "tgt_id": "entity_landlord",
             "description": "A tenant rents or leases property from a landlord under a rental agreement.",
-            "weight": 1.0,
             "keywords": "rents from, leases from, pays rent to, occupies property of",
             "source_id": "tenant_rents_from_landlord",
         },
@@ -620,7 +763,6 @@ SAMPLE_KG = {
             "src_id": "entity_landlord",
             "tgt_id": "entity_tenant",
             "description": "A landlord owns property that is rented or leased to a tenant.",
-            "weight": 1.0,
             "keywords": "rents to, leases to, owns property rented by, provides housing for",
             "source_id": "landlord_rents_to_tenant",
         },
