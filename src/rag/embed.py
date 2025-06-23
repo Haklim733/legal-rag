@@ -5,8 +5,11 @@ import uuid
 from typing import Optional, Dict, Any, List
 from pydantic import BaseModel, Field
 
+# Configure logging to handle ascii_colors errors gracefully
+logging.getLogger("ascii_colors").setLevel(logging.ERROR)
+
 from folio import FOLIO
-from folio.models import OWLClass, OWLObjectProperty
+from folio.models import OWLClass
 from .models import (
     CustomKnowledgeGraph,
     Chunk,
@@ -220,33 +223,56 @@ def create_relationship(
 
 def create_hierarchy_relationships(
     folio_instance: FOLIO,
-    class_iri: str,
-) -> dict[str, Relationship]:
+    owl_class: OWLClass,
+    entities: list[str] = None,
+) -> tuple[dict[str, Relationship], list[Chunk]]:
     """
     Creates hierarchy relationships from FOLIO ontology classes.
+    Only creates relationships where both source and target are in the entities list.
     """
     relationships = {}
-    try:
-        parents = folio_instance.get_parents(class_iri)
-        if parents:
-            for parent_class in parents:
-                parent_iri = parent_class.iri
-                if parent_iri == class_iri:
-                    continue
-                relationship = create_relationship(
-                    folio_instance, class_iri, parent_iri, "subclass_of", True
-                )
-                if relationship:
-                    if relationship.source_id in relationships:
-                        logger.warning(
-                            f"Found duplicate relationship: {relationship.source_id}"
-                        )
-                        continue
-                    relationships[relationship.source_id] = relationship
+    chunks = []
+    parent_iris = owl_class.sub_class_of
+    if not parent_iris:
+        return {}, []
 
-    except Exception as e:
-        logger.warning(f"Could not determine parents for {class_iri}: {e}")
-    return relationships
+    for parent_iri in parent_iris:
+        # Get parent info to check if it's in the filtered entities
+        try:
+            parent_info = folio_instance[parent_iri]
+            parent_name = parent_info.label
+
+            # Skip if we can't get valid names
+            if not parent_name:
+                continue
+
+            # Filter by entities if specified - both source and target must be in entities
+            if entities is not None:
+                if owl_class.label not in entities or parent_name not in entities:
+                    continue
+
+        except Exception as e:
+            logger.warning(f"Could not get parent info for {parent_iri}: {e}")
+            continue
+
+        relationship = create_relationship(
+            folio_instance, owl_class.iri, parent_iri, "subclass_of", True
+        )
+        if relationship:
+            if relationship.source_id in relationships:
+                logger.warning(
+                    f"Found duplicate relationship: {relationship.source_id}"
+                )
+            relationships[relationship.source_id] = relationship
+
+            chunk = Chunk(
+                content=relationship.description,
+                source_id=relationship.source_id,
+                chunk_order_index=0,
+            )
+            chunks.append(chunk)
+
+    return relationships, chunks
 
 
 def create_entities(
@@ -330,11 +356,12 @@ def create_entities(
             logger.error(f"Failed to create entity for {class_name}: {e}")
             continue
 
-        heirarchical_relationships = (
-            create_hierarchy_relationships(folio_instance, class_iri) or {}
+        heirarchical_relationships, heirarchical_chunks = (
+            create_hierarchy_relationships(folio_instance, owl_class, entities) or {}
         )
 
         relationships = relationships | heirarchical_relationships
+        chunks = chunks + heirarchical_chunks
 
     logger.info(
         f"Successfully created {len(chunks)} chunks and {len(entities_dict)} entities, and {len(relationships)} hierarchy relationships"
@@ -353,10 +380,6 @@ def create_predicates(
     """
     relationships = {}
     chunks = []
-
-    logger.info(
-        f"Processing {len(folio_instance.triples)} triples for relationships and chunks..."
-    )
 
     for subject_iri, predicate, object_iri in folio_instance.triples:
         if predicate == "folio:operators":
@@ -536,27 +559,11 @@ def get_all_subclasses(folio_instance: FOLIO, entity_names: list[str]) -> set[st
             all_entities.update(child_labels)
             logger.info(f"Added children for '{name}': {child_labels}")
 
-            # Also get parents of children to ensure all hierarchy relationships are valid
-            for child in children:
-                if child.label:
-                    try:
-                        parents = folio_instance.get_parents(child.iri)
-                        parent_labels = [p.label for p in parents if p.label]
-                        all_entities.update(parent_labels)
-                        logger.info(
-                            f"Added parents for child '{child.label}': {parent_labels}"
-                        )
-                    except Exception as e:
-                        logger.warning(
-                            f"Could not get parents for child '{child.label}': {e}"
-                        )
-
         except Exception as e:
             logger.error(f"Error getting subclasses for '{name}': {e}")
             # Still add the original entity name even if we can't find subclasses
             all_entities.add(name)
 
-    logger.info(f"Final set of entities: {all_entities}")
     return all_entities
 
 
@@ -579,10 +586,8 @@ def create_custom_kg(
     if entities is not None:
         if subclasses:
             target_entities = get_all_subclasses(folio_instance, entities)
-            logger.info(f"Target entities with subclasses: {target_entities}")
         else:
             target_entities = set(entities)
-            logger.info(f"Target entities without subclasses: {target_entities}")
 
     entity_chunks, entities_dict, relationships = create_entities(
         folio_instance, target_entities

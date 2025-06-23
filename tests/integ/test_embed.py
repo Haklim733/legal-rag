@@ -581,10 +581,8 @@ def test_create_custom_kg_filtering_consistency(knowledge_graph):
     """
     # Test that all relationships reference entities that exist
     entity_names = {entity.entity_name for entity in knowledge_graph.entities}
-    print(list(entity_names))
 
     for rel in knowledge_graph.relationships:
-        print(rel)
         # Check that source entity exists
         assert (
             rel.src_id in entity_names

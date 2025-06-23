@@ -110,3 +110,6 @@ For local development without Docker:
 - **Models not found**: Ensure the Ollama service has finished downloading models
 - **Connection errors**: Check that all services are running and healthy
 - **GPU issues**: Verify NVIDIA Docker runtime is properly configured
+
+# Resources
+https://python.plainenglish.io/generating-perfectly-structured-json-using-llms-all-the-time-13b7eb504240

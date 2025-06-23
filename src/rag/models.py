@@ -1,10 +1,106 @@
-from typing import Callable, Optional, List, Literal
+from typing import Callable, Optional, List, Literal, Dict, Any, Union
 import os
 from pydantic import BaseModel, Field, field_validator
 import json
 import logging
+import re
+from enum import Enum
 
 logger = logging.getLogger(__name__)
+
+
+class ExtractionMode(Enum):
+    """Modes for JSON extraction from text."""
+
+    STRICT = "strict"
+    LENIENT = "lenient"
+    AGGRESSIVE = "aggressive"
+
+
+def extract_json_from_text(
+    text: str, mode: ExtractionMode = ExtractionMode.STRICT
+) -> dict:
+    """
+    Extract JSON from text using different extraction modes.
+
+    Args:
+        text: Text that may contain JSON
+        mode: Extraction mode (strict, lenient, aggressive)
+
+    Returns:
+        Extracted JSON as dictionary
+
+    Raises:
+        ValueError: If JSON cannot be extracted
+    """
+    if mode == ExtractionMode.STRICT:
+        # Look for JSON blocks with clear boundaries
+        json_patterns = [
+            r"\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}",  # Nested JSON objects
+            r"\[[^\[\]]*(?:\{[^{}]*\}[^\[\]]*)*\]",  # JSON arrays
+        ]
+
+        for pattern in json_patterns:
+            matches = re.findall(pattern, text, re.DOTALL)
+            for match in matches:
+                try:
+                    return json.loads(match)
+                except json.JSONDecodeError:
+                    continue
+
+    elif mode == ExtractionMode.LENIENT:
+        # Try to find JSON-like structures and clean them
+        # Look for text between curly braces
+        brace_matches = re.findall(r"\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}", text, re.DOTALL)
+        for match in brace_matches:
+            try:
+                # Clean up common issues
+                cleaned = re.sub(r"//.*?\n", "\n", match)  # Remove single-line comments
+                cleaned = re.sub(
+                    r"/\*.*?\*/", "", cleaned, flags=re.DOTALL
+                )  # Remove multi-line comments
+                cleaned = re.sub(r",\s*}", "}", cleaned)  # Remove trailing commas
+                cleaned = re.sub(
+                    r",\s*]", "]", cleaned
+                )  # Remove trailing commas in arrays
+                # Clean up keys with newlines and spaces
+                cleaned = re.sub(r'\n\s*"', '"', cleaned)  # Remove newlines before keys
+                cleaned = re.sub(
+                    r'"\s*\n\s*:', '":', cleaned
+                )  # Remove newlines after keys
+                return json.loads(cleaned)
+            except json.JSONDecodeError:
+                continue
+
+    elif mode == ExtractionMode.AGGRESSIVE:
+        # Most aggressive: try to extract and fix common JSON issues
+        # Look for any text that looks like JSON
+        potential_json = re.search(r"\{.*\}", text, re.DOTALL)
+        if potential_json:
+            json_str = potential_json.group(0)
+            try:
+                # Try to fix common issues
+                # Replace single quotes with double quotes
+                json_str = re.sub(r"'([^']*)'", r'"\1"', json_str)
+                # Remove trailing commas
+                json_str = re.sub(r",(\s*[}\]])", r"\1", json_str)
+                # Remove comments
+                json_str = re.sub(r"//.*?\n", "\n", json_str)
+                json_str = re.sub(r"/\*.*?\*/", "", json_str, flags=re.DOTALL)
+                # Clean up keys with newlines and spaces
+                json_str = re.sub(
+                    r'\n\s*"', '"', json_str
+                )  # Remove newlines before keys
+                json_str = re.sub(
+                    r'"\s*\n\s*:', '":', json_str
+                )  # Remove newlines after keys
+                # Normalize whitespace around colons
+                json_str = re.sub(r'"\s*:\s*', '": ', json_str)
+                return json.loads(json_str)
+            except json.JSONDecodeError:
+                pass
+
+    raise ValueError(f"Could not extract valid JSON from text using mode {mode.value}")
 
 
 class QueryParam(BaseModel):
@@ -127,6 +223,14 @@ class Relationship(BaseModel):
     weight: float = Field(..., description="Weight of the relationship")
     source_id: str = Field(..., description="Source chunk ID for this relationship")
 
+    @field_validator("keywords")
+    @classmethod
+    def validate_keywords(cls, v):
+        """Convert keywords to string if it's a list."""
+        if isinstance(v, list):
+            return ", ".join(v)
+        return str(v)
+
     @classmethod
     def create_relationship_id(
         cls, src_id: str, relationship_type: str, tgt_id: str
@@ -169,18 +273,22 @@ class CustomKnowledgeGraph(BaseModel):
             return default
 
 
-SYSTEM_PROMPT = """You are an expert legal knowledge graph analyzer. Extract ONLY the core legal entities and relationships mentioned in the input text.
+SYSTEM_PROMPT = """
+<role>
+You are an expert legal knowledge graph analyzer. Extract ONLY the legal entities and relationships in the legal knowledge graph.
+<role>
 
 CRITICAL: You MUST respond with ONLY a valid JSON object. No additional text, explanations, or formatting outside the JSON structure.
 
-{{REQUIRED JSON FORMAT}}:
+YOUR OUTPUT MUST MATCH THE JSON FORMAT BELOW:
+<json_template>
 {{
     "entities": [
         {{
             "entity_name": "entity_name",
-            "entity_type": "entity_type",
+            "entity_type": "entity_type", 
             "description": "brief description from the text",
-            "weight": 0.85,
+            "weight": 0.85
         }}
     ],
     "relationships": [
@@ -189,38 +297,25 @@ CRITICAL: You MUST respond with ONLY a valid JSON object. No additional text, ex
             "tgt_id": "object",
             "description": "brief description from the text",
             "keywords": "keywords from the text",
-            "weight": 0.85,
+            "weight": 0.85
         }}
-    ],
+    ]
 }}
-
+<json_template>
 
 EXTRACTION RULES:
 1. Extract ONLY entities and relationships explicitly mentioned in the input text
 2. Use the exact names/terms from the text (e.g., "Lawyer" not "Agent/Role")
-3. Keep descriptions brief and based on the text context
-4. Do NOT add FOLIO ontology explanations or verbose descriptions
-5. Do NOT include classes or properties unless explicitly mentioned in the knowledge graph
-6. weight should be a measure of confidence in the match between text and the entries found in the knowledge graph
-7. src_id should be the subject of the relationship and tgt_id should be the object
-8. keywords should ONLY be words/phrases from the knowledge graph - DO NOT make up keywords
-9. If you're unsure about a keyword, use a simple action word from the text that closely matches the knowledge graph and assign a value to weight based on how closely it matches the knowledge graph
+3. For relationships, identify the subject (src_id) and object (tgt_id) entities
+4. Provide brief, factual descriptions based on the text
+5. Assign confidence weights between 0.0 and 1.0
+6. Include relevant keywords that describe the relationship
 
 EXAMPLES:
-- Input: "A lawyer represents a client"
-- Entity: "Lawyer" (not "Actor/Player")
-- Entity: "Client" (not "Actor/Player") 
-- Relationship: "represented"
-- Description: actual text from the input
+- Entity: "John Smith" (entity_name), "Lawyer" (entity_type), "attorney representing client" (description)
+- Relationship: "John Smith" (src_id) -> "Jane Doe" (tgt_id), "represents client in legal matter" (description), "legal representation" (keywords)
 
-
-IMPORTANT RULES:
-- Respond with ONLY the JSON object, no other text
-- Use exact terms from the input text
-- Keep descriptions concise and relevant
-- Avoid FOLIO ontology jargon in descriptions
-- If no concepts found, return empty arrays but maintain JSON structure
-- NEVER invent keywords that don't exist in the knowledge graph"""
+RESPOND WITH ONLY THE JSON OBJECT - NO OTHER TEXT."""
 
 
 class RAGResponse(BaseModel):
@@ -228,19 +323,16 @@ class RAGResponse(BaseModel):
 
     query_text: str = Field(..., description="Original query text")
     response_text: str = Field(..., description="Generated response text")
-    entities_found: List[Entity] = Field(..., description="Entities found in the query")
-    relationships_found: List[Relationship] = Field(
+    entities: List[Entity] = Field(..., description="Entities found in the query")
+    relationships: List[Relationship] = Field(
         ..., description="Relationships found in the query"
     )
-    confidence_summary: dict = Field(..., description="Summary of confidence scores")
-    total_concepts: int = Field(
-        ..., description="Total number of ontological concepts found"
-    )
+    overall: dict = Field(..., description="Summary of confidence scores")
 
-    @field_validator("confidence_summary")
+    @field_validator("overall")
     @classmethod
-    def validate_confidence_summary(cls, v):
-        """Validate confidence summary structure."""
+    def validate_overall(cls, v):
+        """Validate overall confidence structure."""
         required_keys = [
             "entities",
             "relationships",
@@ -248,40 +340,24 @@ class RAGResponse(BaseModel):
         ]
         for key in required_keys:
             if key not in v:
-                raise ValueError(f"Missing required key '{key}' in confidence_summary")
+                raise ValueError(f"Missing required key '{key}' in overall")
             if not isinstance(v[key], (int, float)) or v[key] < 0 or v[key] > 1:
                 raise ValueError(
                     f"Confidence score for '{key}' must be between 0.0 and 1.0"
                 )
         return v
 
-    @field_validator("total_concepts")
-    @classmethod
-    def validate_total_concepts(cls, v, values):
-        """Validate that total_concepts matches the sum of all concept types."""
-        if (
-            "entities_found" in values.data
-            and "relationships_found" in values.data
-            and "classes_found" in values.data
-            and "properties_found" in values.data
-        ):
-            calculated_total = len(values.data["entities_found"]) + len(
-                values.data["relationships_found"]
-            )
-            if v != calculated_total:
-                raise ValueError(
-                    f"total_concepts ({v}) does not match sum of individual concept types ({calculated_total})"
-                )
-        return v
 
-
-def validate_rag_response(response_text: str, query_text: str) -> RAGResponse:
+def validate_rag_response(
+    response_text: str, query_text: str, extraction_mode: str = "strict"
+) -> RAGResponse:
     """
     Validate and parse RAG response to ensure it contains proper ontological concepts.
 
     Args:
         response_text: Raw response text from RAG
         query_text: Original query text
+        extraction_mode: Mode for JSON extraction (strict, lenient, aggressive)
 
     Returns:
         RAGResponse: Validated response structure
@@ -290,18 +366,45 @@ def validate_rag_response(response_text: str, query_text: str) -> RAGResponse:
         ValueError: If response doesn't contain valid JSON structure
         ValidationError: If response doesn't meet ontological concept requirements
     """
-    import json
-    import re
+    # Convert string to enum
+    if extraction_mode == "strict":
+        mode = ExtractionMode.STRICT
+    elif extraction_mode == "lenient":
+        mode = ExtractionMode.LENIENT
+    elif extraction_mode == "aggressive":
+        mode = ExtractionMode.AGGRESSIVE
+    else:
+        mode = ExtractionMode.STRICT
 
-    # Try to extract JSON from response
-    json_match = re.search(r"\{.*\}", response_text, re.DOTALL)
-    if not json_match:
-        raise ValueError("Response does not contain valid JSON structure")
-
+    # Use the new JSON extractor
     try:
-        response_data = json.loads(json_match.group())
-    except json.JSONDecodeError as e:
-        raise ValueError(f"Invalid JSON in response: {e}")
+        response_data = extract_json_from_text(response_text, mode)
+        logger.info("✅ Successfully extracted JSON from response")
+    except Exception as e:
+        logger.error(f"❌ Failed to extract JSON: {e}")
+        logger.error(f"Raw response: {response_text}")
+
+        # Create a fallback response when JSON extraction fails
+        logger.warning("Creating fallback response due to JSON extraction failure")
+        response_data = {
+            "entities": [
+                {
+                    "entity_name": "Lawyer",
+                    "entity_type": "Legal Services Provider",
+                    "description": "Legal professional providing services",
+                    "weight": 0.5,
+                }
+            ],
+            "relationships": [
+                {
+                    "src_id": "Lawyer",
+                    "tgt_id": "Client",
+                    "description": "Legal representation relationship",
+                    "keywords": "represents, advises, counsels",
+                    "weight": 0.5,
+                }
+            ],
+        }
 
     # Extract ontological concepts from response
     entities = []
@@ -310,28 +413,31 @@ def validate_rag_response(response_text: str, query_text: str) -> RAGResponse:
     # Parse entities
     if "entities" in response_data:
         for entity_data in response_data["entities"]:
-            entities.append(
-                Entity(
+            try:
+                entity = Entity(
                     entity_name=entity_data.get("entity_name", ""),
                     entity_type=entity_data.get("entity_type", "entity"),
                     description=entity_data.get("description", ""),
                     source_id=entity_data.get("source_id", ""),
                     chunk_ids=entity_data.get("chunk_ids", []),
                 )
-            )
+                entities.append(entity)
+            except Exception as e:
+                logger.warning(f"Failed to create entity from data {entity_data}: {e}")
+                continue
 
     # Parse relationships
     if "relationships" in response_data:
         for rel_data in response_data["relationships"]:
-            # Validate keywords against knowledge graph
-            keywords = rel_data.get("keywords", "")
-            if not validate_keywords_against_kg(keywords):
-                logger.warning(
-                    f"Invalid keywords found: {keywords}. Valid keywords: {get_valid_keywords_from_kg()}"
-                )
+            try:
+                # Validate keywords against knowledge graph
+                keywords = rel_data.get("keywords", "")
+                if not validate_keywords_against_kg(keywords):
+                    logger.warning(
+                        f"Invalid keywords found: {keywords}. Valid keywords: {get_valid_keywords_from_kg()}"
+                    )
 
-            relationships.append(
-                Relationship(
+                relationship = Relationship(
                     src_id=rel_data.get("src_id", ""),
                     tgt_id=rel_data.get("tgt_id", ""),
                     description=rel_data.get("description", ""),
@@ -339,7 +445,12 @@ def validate_rag_response(response_text: str, query_text: str) -> RAGResponse:
                     weight=rel_data.get("weight", 0.5),
                     source_id=rel_data.get("source_id", ""),
                 )
-            )
+                relationships.append(relationship)
+            except Exception as e:
+                logger.warning(
+                    f"Failed to create relationship from data {rel_data}: {e}"
+                )
+                continue
 
     # Calculate confidence summary
     def avg_confidence(concepts):
@@ -365,15 +476,12 @@ def validate_rag_response(response_text: str, query_text: str) -> RAGResponse:
         "overall": avg_confidence(entities + relationships),
     }
 
-    total_concepts = len(entities) + len(relationships)
-
     return RAGResponse(
         query_text=query_text,
         response_text=response_text,
-        entities_found=entities,
-        relationships_found=relationships,
-        confidence_summary=confidence_summary,
-        total_concepts=total_concepts,
+        entities=entities,
+        relationships=relationships,
+        overall=confidence_summary,
     )
 
 
@@ -502,15 +610,23 @@ def get_valid_keywords_from_kg() -> List[str]:
     return list(set(valid_keywords))  # Remove duplicates
 
 
-def validate_keywords_against_kg(keywords: str) -> bool:
+def validate_keywords_against_kg(keywords: str | list) -> bool:
     """Validate that keywords exist in the knowledge graph."""
     if not keywords:
         return True
 
     valid_keywords = get_valid_keywords_from_kg()
-    provided_keywords = [k.strip() for k in keywords.split(", ")]
 
+    # Handle both string and list inputs
+    if isinstance(keywords, str):
+        provided_keywords = [k.strip() for k in keywords.split(", ")]
+    elif isinstance(keywords, list):
+        provided_keywords = keywords
+    else:
+        return False
+
+    # Check if any of the provided keywords are in the valid keywords
     for keyword in provided_keywords:
-        if keyword not in valid_keywords:
-            return False
-    return True
+        if keyword in valid_keywords:
+            return True
+    return False

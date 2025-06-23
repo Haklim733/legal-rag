@@ -3,8 +3,7 @@ Unit tests for RAG model outputs and core functionality.
 """
 
 import pytest
-import json
-from src.rag.models import RAGResponse, OntologicalConcept, validate_rag_response
+from src.rag.models import RAGResponse, validate_rag_response
 
 
 def test_rag_response_structure():

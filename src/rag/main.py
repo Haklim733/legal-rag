@@ -4,6 +4,7 @@ import nest_asyncio
 import os
 from pathlib import Path
 import time
+import sys
 
 from folio import FOLIO
 from lightrag import LightRAG
@@ -11,16 +12,31 @@ from lightrag.kg.shared_storage import initialize_pipeline_status
 from lightrag.llm.ollama import ollama_embed, ollama_model_complete
 from lightrag.utils import EmbeddingFunc
 
-from .embed import create_custom_kg, filter_knowledge_graph
+from .embed import create_custom_kg
 from .models import (
     QueryParam,
-    SAMPLE_KG,
     SYSTEM_PROMPT,
     validate_rag_response,
     RAGResponse,
 )
 
 nest_asyncio.apply()
+
+# Configure logging to handle ascii_colors errors gracefully
+logging.getLogger("ascii_colors").setLevel(logging.ERROR)
+
+
+# Suppress ascii_colors errors by redirecting stderr for that specific error
+class SuppressAsciiColorsError:
+    def __enter__(self):
+        self.original_stderr = sys.stderr
+        sys.stderr = open(os.devnull, "w")
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        sys.stderr.close()
+        sys.stderr = self.original_stderr
+
 
 logger = logging.getLogger(__name__)
 
@@ -92,10 +108,13 @@ def main(query_text: str = None) -> RAGResponse:
     logger.info("Creating filtered knowledge graph...")
     custom_kg = create_custom_kg(
         folio_instance,
-        entity_filters=["Actor / Player"],  # Include specific entities
-        include_subclasses=True,  # Include all subclasses
-        as_dict=True,
+        entities=[
+            "Legal Services Buyer",
+            "Legal Services Provider",
+        ],  # Include specific entitties
+        subclasses=True,  # Include all subclasses
     )
+    print(custom_kg)
 
     logger.info("Inserting filtered custom knowledge graph into LightRAG...")
     rag.insert_custom_kg(custom_kg)
@@ -117,68 +136,56 @@ def main(query_text: str = None) -> RAGResponse:
         validated_response = validate_rag_response(response, query_text)
         logger.info("✅ Response validation successful!")
         logger.info(f"📊 Validation Summary:")
-        logger.info(f"   - Total concepts found: {validated_response.total_concepts}")
-        logger.info(f"   - Entities: {len(validated_response.entities_found)}")
         logger.info(
-            f"   - Relationships: {len(validated_response.relationships_found)}"
+            f"   - Total concepts found: {len(validated_response.entities) + len(validated_response.relationships)}"
         )
-        logger.info(f"   - Classes: {len(validated_response.classes_found)}")
-        logger.info(f"   - Properties: {len(validated_response.properties_found)}")
-        logger.info(
-            f"   - Overall confidence: {validated_response.confidence_summary['overall']:.3f}"
-        )
+        logger.info(f"   - Entities: {len(validated_response.entities)}")
+        logger.info(f"   - Relationships: {len(validated_response.relationships)}")
 
         # Log detailed concept information
-        if validated_response.entities_found:
+        if validated_response.entities:
             logger.info("🏢 Entities found:")
-            for entity in validated_response.entities_found:
-                logger.info(
-                    f"   - {entity.concept_name} (confidence: {entity.confidence_score:.3f})"
-                )
+            for entity in validated_response.entities:
+                logger.info(f"   - {entity.entity_name} (type: {entity.entity_type})")
                 logger.info(f"     Description: {entity.description}")
 
-        if validated_response.relationships_found:
+        if validated_response.relationships:
             logger.info("🔗 Relationships found:")
-            for rel in validated_response.relationships_found:
+            for rel in validated_response.relationships:
                 logger.info(
-                    f"   - {rel.concept_name} (confidence: {rel.confidence_score:.3f})"
+                    f"   - {rel.src_id} -> {rel.tgt_id} (weight: {rel.weight:.3f})"
                 )
                 logger.info(f"     Description: {rel.description}")
 
-        if validated_response.classes_found:
-            logger.info("📚 Classes found:")
-            for cls in validated_response.classes_found:
-                logger.info(
-                    f"   - {cls.concept_name} (confidence: {cls.confidence_score:.3f})"
-                )
-                logger.info(f"     Description: {cls.description}")
-
-        if validated_response.properties_found:
-            logger.info("🔧 Properties found:")
-            for prop in validated_response.properties_found:
-                logger.info(
-                    f"   - {prop.concept_name} (confidence: {prop.confidence_score:.3f})"
-                )
-                logger.info(f"     Description: {prop.description}")
-
         # Return validated response for further processing
+        # Finalize before returning
+        try:
+            asyncio.run(rag.finalize_storages())
+        except Exception as e:
+            logger.warning(f"Error during finalize (non-critical): {e}")
         return validated_response
 
     except ValueError as e:
-        logger.error(f"❌ Response validation failed: {e}")
+        logger.error(f"Response validation failed: {e}")
         logger.error(
             "Response does not contain valid JSON structure with ontological concepts"
         )
         logger.error(f"Raw response: {response}")
+        # Finalize before raising exception
+        try:
+            asyncio.run(rag.finalize_storages())
+        except Exception as finalize_error:
+            logger.warning(f"Error during finalize (non-critical): {finalize_error}")
         raise
     except Exception as e:
-        logger.error(f"❌ Unexpected error during response validation: {e}")
+        logger.error(f"Unexpected error during response validation: {e}")
         logger.error(f"Raw response: {response}")
+        # Finalize before raising exception
+        try:
+            asyncio.run(rag.finalize_storages())
+        except Exception as finalize_error:
+            logger.warning(f"Error during finalize (non-critical): {finalize_error}")
         raise
-
-    # Finalize
-    asyncio.run(rag.finalize_storages())
-    logger.info("-------------------------")
 
 
 if __name__ == "__main__":
@@ -186,6 +193,5 @@ if __name__ == "__main__":
     result = main(query_text)
     print(f"\n🎯 Final Result Summary:")
     print(f"Query: {result.query_text}")
-    print(f"Total ontological concepts found: {result.total_concepts}")
     print(f"Overall confidence: {result.confidence_summary['overall']:.3f}")
     print(f"Response validation: ✅ SUCCESS")
