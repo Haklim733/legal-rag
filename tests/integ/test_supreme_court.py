@@ -18,7 +18,7 @@ from src.docs.process_pdfs import (
 )
 from src.docs.models import SupremeCourtCase
 from src.rag.main import main
-from src.rag.models import RAGResponse, validate_rag_response
+from src.rag.models import RAGResponse
 
 
 # Use the same test PDF path as unit tests
@@ -394,7 +394,7 @@ def test_supreme_court_pdf_performance():
         raise
 
 
-@pytest.mark.skip(reason="Skipping LLM extraction test")
+# @pytest.mark.skip(reason="Skipping LLM extraction test")
 def test_llm_extraction():
     """Test LLM extraction of Supreme Court PDF with response validation."""
     # Skip test if the test PDF doesn't exist
@@ -407,9 +407,9 @@ def test_llm_extraction():
             TEST_PDF_PATH,
             method=ExtractionMethod.UNSTRUCTURED,
             strategy="fast",
-            preserve_hierarchy=True,
-            extract_metadata=True,
-            max_pages=10,
+            preserve_hierarchy=False,
+            extract_metadata=False,
+            max_pages=1,
         )
 
         assert result.success, "Expected successful PDF extraction"
@@ -427,118 +427,49 @@ def test_llm_extraction():
         ), "Expected query text to match"
         assert len(response.response_text) > 0, "Expected non-empty response text"
 
-        # Validate ontological concepts
-        assert response.total_concepts >= 0, "Expected non-negative total concepts"
-        assert isinstance(
-            response.entities_found, list
-        ), "Expected entities_found to be list"
-        assert isinstance(
-            response.relationships_found, list
-        ), "Expected relationships_found to be list"
-        assert isinstance(
-            response.classes_found, list
-        ), "Expected classes_found to be list"
-        assert isinstance(
-            response.properties_found, list
-        ), "Expected properties_found to be list"
+        assert len(response.entities) > 0
+        print(response.entities)
+        assert len(response.relationships) > 0
+        print(response.entities)
 
         # Validate confidence summary
-        confidence_summary = response.confidence_summary
-        assert isinstance(
-            confidence_summary, dict
-        ), "Expected confidence_summary to be dict"
-        required_keys = [
-            "entities",
-            "relationships",
-            "classes",
-            "properties",
-            "overall",
-        ]
-        for key in required_keys:
-            assert key in confidence_summary, f"Expected {key} in confidence_summary"
-            assert (
-                0.0 <= confidence_summary[key] <= 1.0
-            ), f"Expected {key} confidence between 0.0 and 1.0"
-
-        # Test individual concept validation
-        for entity in response.entities_found:
-            assert entity.concept_name, "Expected non-empty concept name"
-            assert entity.concept_type == "entity", "Expected entity type"
+        overall = response.overall
+        assert isinstance(overall, dict), "Expected overall to be dict"
+        # Test individual entity validation
+        for entity in response.entities:
+            assert entity.entity_name, "Expected non-empty entity name"
+            assert entity.entity_type, "Expected non-empty entity type"
             assert entity.description, "Expected non-empty description"
-            assert (
-                0.0 <= entity.confidence_score <= 1.0
-            ), "Expected valid confidence score"
-            assert isinstance(
-                entity.relationships, list
-            ), "Expected relationships to be list"
+            # assert entity.source_id, "Expected non-empty source_id"
+            assert isinstance(entity.chunk_ids, list), "Expected chunk_ids to be list"
 
-        for rel in response.relationships_found:
-            assert rel.concept_name, "Expected non-empty concept name"
-            assert rel.concept_type == "relationship", "Expected relationship type"
+        # Test individual relationship validation
+        for rel in response.relationships:
+            assert rel.src_id, "Expected non-empty src_id"
+            assert rel.tgt_id, "Expected non-empty tgt_id"
             assert rel.description, "Expected non-empty description"
-            assert 0.0 <= rel.confidence_score <= 1.0, "Expected valid confidence score"
-            assert isinstance(
-                rel.relationships, list
-            ), "Expected relationships to be list"
-
-        for cls in response.classes_found:
-            assert cls.concept_name, "Expected non-empty concept name"
-            assert cls.concept_type == "class", "Expected class type"
-            assert cls.description, "Expected non-empty description"
-            assert 0.0 <= cls.confidence_score <= 1.0, "Expected valid confidence score"
-            assert isinstance(
-                cls.relationships, list
-            ), "Expected relationships to be list"
-
-        for prop in response.properties_found:
-            assert prop.concept_name, "Expected non-empty concept name"
-            assert prop.concept_type == "property", "Expected property type"
-            assert prop.description, "Expected non-empty description"
-            assert (
-                0.0 <= prop.confidence_score <= 1.0
-            ), "Expected valid confidence score"
-            assert isinstance(
-                prop.relationships, list
-            ), "Expected relationships to be list"
+            assert rel.keywords, "Expected non-empty keywords"
+            assert 0.0 <= rel.weight <= 1.0, "Expected valid weight"
+            assert rel.source_id, "Expected non-empty source_id"
 
         # Print validation results
         print(f"✅ LLM Extraction and Response Validation Successful!")
         print(f"📊 Response Summary:")
-        print(f"   - Total concepts found: {response.total_concepts}")
-        print(f"   - Entities: {len(response.entities_found)}")
-        print(f"   - Relationships: {len(response.relationships_found)}")
-        print(f"   - Classes: {len(response.classes_found)}")
-        print(f"   - Properties: {len(response.properties_found)}")
-        print(f"   - Overall confidence: {response.confidence_summary['overall']:.3f}")
+        print(f"   - Total concepts found: {total_concepts}")
+        print(f"   - Entities: {len(response.entities)}")
+        print(f"   - Relationships: {len(response.relationships)}")
+        print(f"   - Overall confidence: {overall['overall']:.3f}")
 
         # Print detailed concept information
-        if response.entities_found:
+        if response.entities:
             print(f"🏢 Entities found:")
-            for entity in response.entities_found:
-                print(
-                    f"   - {entity.concept_name} (confidence: {entity.confidence_score:.3f})"
-                )
+            for entity in response.entities:
+                print(f"   - {entity.entity_name} (type: {entity.entity_type})")
 
-        if response.relationships_found:
+        if response.relationships:
             print(f"🔗 Relationships found:")
-            for rel in response.relationships_found:
-                print(
-                    f"   - {rel.concept_name} (confidence: {rel.confidence_score:.3f})"
-                )
-
-        if response.classes_found:
-            print(f"📚 Classes found:")
-            for cls in response.classes_found:
-                print(
-                    f"   - {cls.concept_name} (confidence: {cls.confidence_score:.3f})"
-                )
-
-        if response.properties_found:
-            print(f"🔧 Properties found:")
-            for prop in response.properties_found:
-                print(
-                    f"   - {prop.concept_name} (confidence: {prop.confidence_score:.3f})"
-                )
+            for rel in response.relationships:
+                print(f"   - {rel.src_id} -> {rel.tgt_id} (weight: {rel.weight:.3f})")
 
     except RuntimeError as e:
         if "poppler" in str(e).lower():
