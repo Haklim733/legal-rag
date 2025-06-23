@@ -13,10 +13,20 @@ logging.getLogger("ascii_colors").setLevel(logging.ERROR)
 
 TEST_QUERY = "John, a professional lawyer at the Legal Aid of Los Angeles, spoke on behalf of Jane, a recent evictee of her apartment. Jane is a tenant of a rental property in Los Angeles, California. She received a notice to vacate the property, but she disputes the eviction. She is seeking legal representation and court proceedings to defend her case. The lawyer provides legal advice and represents clients in eviction cases."
 
+# Default test entities
+DEFAULT_ENTITIES = [
+    "Lawyer",
+    "Legal Services Buyer",
+]
+
+# Default model names
+DEFAULT_LLM_MODEL = "llama3.1:8b"
+DEFAULT_EMBED_MODEL = "all-minilm"
+
 
 @pytest.fixture(scope="module")
 def response():
-    return main(TEST_QUERY)
+    return main(TEST_QUERY, DEFAULT_ENTITIES, DEFAULT_LLM_MODEL, DEFAULT_EMBED_MODEL)
 
 
 def test_rag_response_structure(response):
@@ -37,25 +47,12 @@ def test_rag_response_structure(response):
             response.relationships, list
         ), "Expected relationships to be list"
 
-        # Test confidence summary
-        overall = response.overall
-        assert isinstance(overall, dict), "Expected overall to be dict"
-        required_keys = [
-            "entities",
-            "relationships",
-            "overall",
-        ]
-        for key in required_keys:
-            assert key in overall, f"Expected {key} in overall"
-            assert (
-                0.0 <= overall[key] <= 1.0
-            ), f"Expected {key} confidence between 0.0 and 1.0"
-
         print(f"✅ RAG Response Structure Test Passed")
         print(
             f"   - Total concepts: {len(response.entities) + len(response.relationships)}"
         )
-        print(f"   - Overall confidence: {overall['overall']:.3f}")
+        print(f"   - Entities: {len(response.entities)}")
+        print(f"   - Relationships: {len(response.relationships)}")
 
     except Exception as e:
         print(f"❌ RAG response structure test failed: {e}")
@@ -87,21 +84,14 @@ def test_rag_response_consistency(response):
 
         # Test that all responses have similar structure
         total_concepts = [len(r.entities) + len(r.relationships) for r in responses]
-        overall_confidences = [r.overall["overall"] for r in responses]
 
         print(f"✅ RAG Response Consistency Test Passed")
         print(f"   - Total concepts across runs: {total_concepts}")
-        print(
-            f"   - Overall confidences across runs: {[f'{c:.3f}' for c in overall_confidences]}"
-        )
 
         # All responses should have some concepts
         assert all(
             tc >= 0 for tc in total_concepts
         ), "All runs should have non-negative total concepts"
-        assert all(
-            0.0 <= c <= 1.0 for c in overall_confidences
-        ), "All confidences should be between 0.0 and 1.0"
 
     except Exception as e:
         print(f"❌ RAG response consistency test failed: {e}")
@@ -131,9 +121,6 @@ def test_rag_response_validation_function(response):
 
         print(f"✅ RAG Response Validation Function Test Passed")
         print(f"   - Validated total concepts: {total_concepts}")
-        print(
-            f"   - Validated overall confidence: {validated_response.overall['overall']:.3f}"
-        )
 
     except Exception as e:
         print(f"❌ RAG response validation function test failed: {e}")
@@ -154,7 +141,9 @@ def test_rag_with_different_queries():
         for i, query in enumerate(test_queries):
             print(f"\n🧪 Testing query {i+1}: {query}")
 
-            response = main(query)
+            response = main(
+                query, DEFAULT_ENTITIES, DEFAULT_LLM_MODEL, DEFAULT_EMBED_MODEL
+            )
 
             # Basic validation
             assert isinstance(
@@ -171,7 +160,8 @@ def test_rag_with_different_queries():
             # Print results
             print(f"   ✅ Query {i+1} passed")
             print(f"   - Total concepts: {total_concepts}")
-            print(f"   - Overall confidence: {response.overall['overall']:.3f}")
+            print(f"   - Entities: {len(response.entities)}")
+            print(f"   - Relationships: {len(response.relationships)}")
 
             # Test that we get some response
             assert (
@@ -191,7 +181,9 @@ def test_rag_error_handling():
     try:
         # Test with empty query - this might not raise an exception but should handle gracefully
         try:
-            response = main("")
+            response = main(
+                "", DEFAULT_ENTITIES, DEFAULT_LLM_MODEL, DEFAULT_EMBED_MODEL
+            )
             # If it doesn't raise an exception, it should return a valid response
             assert isinstance(
                 response, RAGResponse
@@ -202,7 +194,9 @@ def test_rag_error_handling():
 
         # Test with very long query
         long_query = "A " * 1000 + "lawyer represents a client."
-        response = main(long_query)
+        response = main(
+            long_query, DEFAULT_ENTITIES, DEFAULT_LLM_MODEL, DEFAULT_EMBED_MODEL
+        )
         assert isinstance(response, RAGResponse), "Expected RAGResponse for long query"
 
         print(f"✅ RAG Error Handling Test Passed")

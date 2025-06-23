@@ -15,7 +15,7 @@ from lightrag.utils import EmbeddingFunc
 from src.docs.process_pdfs import extract_pdf
 from src.docs.models import ExtractionMethod
 
-from .embed import create_custom_kg
+from .kg import create_custom_kg
 from .models import (
     QueryParam,
     extract_json_from_text,
@@ -90,10 +90,9 @@ async def initialize_rag(llm_model_name: str, embed_model_name: str):
 
 def main(
     query_text: str,
-    pdf_path: str = None,
-    entities: list[str] = None,
-    llm_model_name: str = "llama3.1:8b",
-    embed_model_name: str = "llama3.1:8b",
+    entities: list[str],
+    llm_model_name: str,
+    embed_model_name: str,
 ) -> RAGResponse:
     # Initialize RAG
     rag = asyncio.run(initialize_rag(llm_model_name, embed_model_name))
@@ -304,8 +303,6 @@ if __name__ == "__main__":
         print(
             f"Found {len(response.entities)} entities and {len(response.relationships)} relationships."
         )
-        print(f"Overall confidence: {response.overall['overall']:.2f}")
-        print("\n--- Details ---")
         print("Response Text from LLM:")
         print(response.response_text)
     else:

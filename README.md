@@ -1,6 +1,6 @@
 # Overview
 
-This is sample repo to extract text from pdfs and extract ontological concepts using FOLIO ontology and LightRAG. This is a proof of concept that stores FOLIO ontology in a knowledge graph and use LightRAG to query the document store.
+This is sample repo to extract text from legal pdfs like the supreme court cases and opinions and extract ontological concepts using the [Federated Open Legal Information Ontology (FOLIO) ontology](https://openlegalstandard.org/resources/folio-python-library/) and [LightRAG](https://github.com/HKUDS/LightRAG/). This is a proof of concept that stores FOLIO ontology in a knowledge graph that is utilized by LightRAG and llms to extract ontological concepts from the document.
 
 # Execution  
 
@@ -85,6 +85,7 @@ uv run -m src.rag.main --help
 5. checkout Langchain LLM Transformers
 6. use llm api key
 7. embed entity and relationship descriptions into vector db
+8. create a data pipeline to extract text from pdfs and save to tables in data lake
 
 ## Docker Setup with Ollama Models
 Coming soon
@@ -96,6 +97,3 @@ Coming soon
 - **GPU issues**: Verify NVIDIA Docker runtime is properly configured
 
 - **cannot run the script**: try: `chmod +x scripts/run.sh`
-
-# Resources
-https://python.plainenglish.io/generating-perfectly-structured-json-using-llms-all-the-time-13b7eb504240

@@ -10,13 +10,13 @@ from folio import FOLIO
 from folio.models import OWLClass, OWLObjectProperty
 
 # Import the ontology functions
-from src.rag.embed import (
+from rag.kg import (
     _get_children_with_depth,
     _get_class_depth,
     create_custom_kg,
     get_all_subclasses,
 )
-from src.rag.embed import CustomKnowledgeGraph
+from rag.kg import CustomKnowledgeGraph
 
 os.environ["OPENAI_API_KEY"]
 
@@ -428,7 +428,7 @@ def test_create_custom_kg_multiple_relationships(knowledge_graph):
     """
     Test that entities can have multiple relationships (both outgoing and incoming).
     """
-    from src.rag.embed import get_entity_relationships, get_entity_relationship_summary
+    from rag.kg import get_entity_relationships, get_entity_relationship_summary
 
     # Get all entities and their relationship counts
     entity_relationship_counts = {}

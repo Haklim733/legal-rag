@@ -582,13 +582,17 @@ def create_custom_kg(
     Returns:
         CustomKnowledgeGraph with filtered entities and relationships
     """
-    # First, create entities and chunks, along with hierarchy relationships
+    # Initialize target_entities
     if entities is not None:
         if subclasses:
             target_entities = get_all_subclasses(folio_instance, entities)
         else:
             target_entities = set(entities)
+    else:
+        # If no entities specified, use None to process all entities
+        target_entities = None
 
+    # First, create entities and chunks, along with hierarchy relationships
     entity_chunks, entities_dict, relationships = create_entities(
         folio_instance, target_entities
     )
